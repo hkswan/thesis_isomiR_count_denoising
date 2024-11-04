@@ -22,8 +22,8 @@ library(DESeq2)
 library(Biostrings)
 
 #load functions:
-source("/scratch/hswan/thesis_lengthvariant_ID/correct_technical_length_variant_functions.R")
-source("/scratch/hswan/thesis_lengthvariant_ID/correct_isomiR_counts_v2_FUNCTION.R")
+source("correct_technical_length_variant_functions.R")
+source("correct_isomiR_counts_v2_FUNCTION.R")
 ```
 
 #### Load Ernesto's benchmark dataset of sequencing mouse miRNAs:
