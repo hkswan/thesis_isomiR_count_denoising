@@ -1,0 +1,121 @@
+---
+title: "Mouse miRNA Denoising Algorithm Demo"
+author: "Hannah Swan"
+date: "November 4, 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r}
+#clear environment
+rm(list=ls())
+
+```
+
+```{r, include=FALSE}
+#load necessary packages:
+library(tidyverse)
+library(DESeq2)
+library(Biostrings)
+
+#load functions:
+source("/scratch/hswan/thesis_lengthvariant_ID/correct_technical_length_variant_functions.R")
+source("/scratch/hswan/thesis_lengthvariant_ID/correct_isomiR_counts_v2_FUNCTION.R")
+```
+
+#### Load Ernesto's benchmark dataset of sequencing mouse miRNAs:
+```{r}
+load("/scratch/mmccall2_lab/miRNA_reference/Rdata/summarized_experiment_miRNA.RData")
+miRNA_se_object = se_object
+load("/scratch/mmccall2_lab/miRNA_reference/Rdata/summarized_experiment_isomiR.RData")
+seq_level_se_object = se_object
+rm(se_object)
+
+miRNA_counts = cbind(rowData(miRNA_se_object), count = miRNA_se_object@assays@data$counts[,"1L"]) %>% data.frame()
+
+
+num_mirnas = dim(miRNA_se_object)[1]
+num_samples = dim(miRNA_se_object)[2]
+
+cat("\nBenchmark dataset contains", num_mirnas, "miRNAs from", num_samples, "samples.\n")
+
+```
+
+Extract rowdata from `seq_level_se_object`
+```{r}
+rowdata = rowData(seq_level_se_object) %>% data.frame()
+#renaming miRNA column for compatibility w/ denoising function 
+colnames(rowdata)[2] = 'miRNA_name'
+head(rowdata)
+```
+
+Extract countdata from `seq_level_se_object`
+```{r}
+countdata = seq_level_se_object@assays@data$counts %>% data.frame()
+head(countdata)
+
+```
+
+#### Select a suitable test miRNA for demonstration 
+For each miRNA, filter the rowdata so we are looking only at sequences mapping to that miRNA and then count the number of rows in that dataframe. We want a miRNA with a decent level of expression so relatively high read count but not the highest number of isomiRs mapping to that miRNA because then the algorithm will take awhile. 
+```{r}
+num_isomirs = vector()
+for(miRNA in miRNA_counts$miRNA){
+  num_isomirs = c(num_isomirs, filter(rowdata, miRNA_name == miRNA) %>% nrow())
+}
+
+miRNA_counts$num_isomirs = num_isomirs
+head(miRNA_counts)
+
+mirnas_for_testing = filter(miRNA_counts, count >=1000) %>% filter(., num_isomirs < 1000) %>% select(., miRNA) %>% unlist()
+
+cat("\nmiRNAs suitable for testing are:\n")
+filter(miRNA_counts, miRNA %in% mirnas_for_testing)
+
+
+```
+
+Select a test miRNA
+```{r}
+test_miRNA = mirnas_for_testing[1]
+cat("miRNA we will be using for testing is", test_miRNA, "\n")
+```
+
+First we run for just 2 iterations to make sure that algorithm works without any errors:
+```{r}
+tst = correct_isomiR_counts_v2(test_mirna = test_miRNA, rowdata=rowdata, countdata=countdata, sample_idx = 2, max_iterations = 2, OMEGA_A = 0.05)
+```
+
+After one iteration, we have the following `partition_df` object:
+```{r}
+head(tst$partition_df)
+```
+
+The two partitions in the data have the following center sequences with associated read counts in sample 2:
+```{r}
+filter(tst$partition_df, center == 1)
+```
+
+Observe that for this dataset, at least in this sample, we have a lot less degradation in this sample. 
+```{r}
+filter(tst$partition_df, seqlen == min(seqlen))
+```
+
+So only 1 sequence has a length of  15 mapping to this miRNA. This may have to do with the parameters that were used to perform the alignment but the point still stands that we don't have any of the short little 8/9  nucleotide fragments that we had in the ERCC dataset. 
+
+### Allow the algorithm to remove all technical length isomiRs for the specified test miRNA
+```{r}
+tst_rmv_all = correct_isomiR_counts_v2(test_mirna = test_miRNA, rowdata=rowdata, countdata=countdata, sample_idx=2, max_iterations = 20, OMEGA_A=0.05)
+```
+
+
+```{r}
+cat("Results of running  algorithm on miRNA", test_miRNA, ":\n")
+table(tst_rmv_all$partition)
+cat("There are", max(tst_rmv_all$partition), "true sequences mapping to miRNA",  test_miRNA, "in this sample. \n")
+cat("\n The 16 true sequences mapping to miRNA", test_miRNA, "are\n")
+filter(tst_rmv_all, center == 1 )
+```
