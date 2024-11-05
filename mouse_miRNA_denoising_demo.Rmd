@@ -119,3 +119,49 @@ cat("There are", max(tst_rmv_all$partition), "true sequences mapping to miRNA", 
 cat("\n The 16 true sequences mapping to miRNA", test_miRNA, "are\n")
 filter(tst_rmv_all, center == 1 )
 ```
+
+```{r}
+colnames(countdata)=str_remove_all(colnames(countdata), "X")
+colnames(countdata)
+
+liver_samples = sapply(1:5, function(x) return(paste0(x, "L", collapse="")))
+liver_sample_indices = which(colnames(countdata) %in% liver_samples)
+```
+
+Now we're going to remove all technical isomiRs mapping to the test miRNA as identifed by our model across all pure liver samples:
+```{r, eval=FALSE}
+tst_rmv_all_across_liver_samples = lapply(liver_sample_indices, function(x) correct_isomiR_counts_v2(test_miRNA, rowdata=rowdata, countdata=countdata, x, max_iterations=20, OMEGA_A=0.05))
+
+
+```
+
+
+First look at what the initial center sequence is for each of the 5 samples:
+```{r}
+initial_center_sequences = vector()
+for(i in 1:length(tst_rmv_all_across_liver_samples)){
+  cat("The initial center sequence in liver sample", i, "is:\n")
+  cs =  filter(tst_rmv_all_across_liver_samples[[i]], center == 1 & partition ==  1) %>% select(.,  uniqueSequence) %>% unlist() 
+  print(cs)
+  initial_center_sequences = c(initial_center_sequences, cs)
+  
+}
+if(length(unique(initial_center_sequences))==1){
+  cat("All samples begin with same true sequence.\n")
+}
+```
+
+Now look at number of partitions in each sample:
+```{r}
+num_partitions_by_sample = vector()
+for(i in 1:length(tst_rmv_all_across_liver_samples)){
+  num = max(tst_rmv_all_across_liver_samples[[i]]$partition)
+  num_partitions_by_sample = c(num_partitions_by_sample, num)
+}
+
+cat("Each sample has the following number of partitions, which equates to the number of true isomiR sequences\n")
+print(num_partitions_by_sample)
+```
+
+From this we can definitely see that there is some variability in the number of partitions that exists within this test miRNA for each sample. I suspect that this has to do with varying sequencing depths across each of these samples in combination with partitions that are centered by a sequence with low counts i.e. some later partitions are formed by sequences with only a single observed read. In samples with a greater sequencing depth we might see more of these singleton sequences or even sequences with a handful of counts that get their own partition. \n
+I think what's most important 
