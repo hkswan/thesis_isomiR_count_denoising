@@ -108,7 +108,12 @@ So only 1 sequence has a length of  15 mapping to this miRNA. This may have to d
 
 ### Allow the algorithm to remove all technical length isomiRs for the specified test miRNA
 ```{r}
-tst_rmv_all = correct_isomiR_counts_v2(test_mirna = test_miRNA, rowdata=rowdata, countdata=countdata, sample_idx=2, max_iterations = 20, OMEGA_A=0.05)
+if(!('tst_rmv_all.Rds' %in% list.files())){
+  tst_rmv_all = correct_isomiR_counts_v2(test_mirna = test_miRNA, rowdata=rowdata, countdata=countdata, sample_idx=2, max_iterations = 20, OMEGA_A=0.05)
+  saveRDS(tst_rmv_all, "tst_rmv_all.Rds")
+} else{
+  tst_rmv_all = readRDS("tst_rmv_all.Rds")
+}
 ```
 
 
