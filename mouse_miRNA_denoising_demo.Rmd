@@ -129,8 +129,13 @@ liver_sample_indices = which(colnames(countdata) %in% liver_samples)
 ```
 
 Now we're going to remove all technical isomiRs mapping to the test miRNA as identifed by our model across all pure liver samples:
-```{r, eval=FALSE}
-tst_rmv_all_across_liver_samples = lapply(liver_sample_indices, function(x) correct_isomiR_counts_v2(test_miRNA, rowdata=rowdata, countdata=countdata, x, max_iterations=20, OMEGA_A=0.05))
+```{r}
+if(!('tst_rmv_all_across_liver_samples.Rds' %in% list.files())){
+  tst_rmv_all_across_liver_samples = lapply(liver_sample_indices, function(x) correct_isomiR_counts_v2(test_miRNA, rowdata=rowdata, countdata=countdata, x, max_iterations=20, OMEGA_A=0.05))
+  saveRDS(tst_rmv_all_across_liver_samples, "tst_rmv_all_across_liver_samples.Rds")
+} else{
+  tst_rmv_all_across_liver_samples = readRDS("tst_rmv_all_across_liver_samples.Rds")
+}
 
 
 ```

@@ -662,6 +662,37 @@ pre code {
 ## 14        TAATGCCCCTAAAAATCCC Mmu-Mir-193-P2b_3p    19        14      1     19
 ## 15        TAATGCCCCTAAAAATCCT Mmu-Mir-193-P2b_3p    77         7      1     19
 ## 16     TAATGCCCCTAAAAATCCTTAC Mmu-Mir-193-P2b_3p   109        10      1     22</code></pre>
+<pre><code>##  [1] &quot;1L_2L_3L_4L_5L&quot; &quot;1L&quot;             &quot;1S_2&quot;           &quot;1S&quot;            
+##  [5] &quot;20_1S_80_1L&quot;    &quot;20_2S_80_2L&quot;    &quot;20_3S_80_3L&quot;    &quot;20_4S_80_4L&quot;   
+##  [9] &quot;20_5S_80_5L_1&quot;  &quot;20_5S_80_5L_2&quot;  &quot;2L&quot;             &quot;2S&quot;            
+## [13] &quot;3L&quot;             &quot;3S&quot;             &quot;40_1S_60_1L&quot;    &quot;40_2S_60_2L&quot;   
+## [17] &quot;40_3S_60_3L&quot;    &quot;40_4S_60_4L_1&quot;  &quot;40_4S_60_4L_2&quot;  &quot;40_5S_60_5L&quot;   
+## [21] &quot;4L&quot;             &quot;4S&quot;             &quot;5L&quot;             &quot;5S&quot;            
+## [25] &quot;60_1S_40_1L&quot;    &quot;60_2S_40_2L&quot;    &quot;60_3S_40_3L_1&quot;  &quot;60_3S_40_3L_2&quot; 
+## [29] &quot;60_4S_40_4L&quot;    &quot;60_5S_40_5L&quot;    &quot;80_1S_20_1L&quot;    &quot;80_2S_20_2L_1&quot; 
+## [33] &quot;80_2S_20_2L_2&quot;  &quot;80_3S_20_3L&quot;    &quot;80_4S_20_4L&quot;    &quot;80_5S_20_5L&quot;</code></pre>
+<p>Now we're going to remove all technical isomiRs mapping to the test miRNA as identifed by our model across all pure liver samples:</p>
+<p>First look at what the initial center sequence is for each of the 5 samples:</p>
+<pre><code>## The initial center sequence in liver sample 1 is:
+##           uniqueSequence 
+## &quot;TAATGCCCCTAAAAATCCTTAT&quot; 
+## The initial center sequence in liver sample 2 is:
+##           uniqueSequence 
+## &quot;TAATGCCCCTAAAAATCCTTAT&quot; 
+## The initial center sequence in liver sample 3 is:
+##           uniqueSequence 
+## &quot;TAATGCCCCTAAAAATCCTTAT&quot; 
+## The initial center sequence in liver sample 4 is:
+##           uniqueSequence 
+## &quot;TAATGCCCCTAAAAATCCTTAT&quot; 
+## The initial center sequence in liver sample 5 is:
+##           uniqueSequence 
+## &quot;TAATGCCCCTAAAAATCCTTAT&quot;</code></pre>
+<pre><code>## All samples begin with same true sequence.</code></pre>
+<p>Now look at number of partitions in each sample:</p>
+<pre><code>## Each sample has the following number of partitions, which equates to the number of true isomiR sequences</code></pre>
+<pre><code>## [1] 16 26 25 26 18</code></pre>
+<p>From this we can definitely see that there is some variability in the number of partitions that exists within this test miRNA for each sample. I suspect that this has to do with varying sequencing depths across each of these samples in combination with partitions that are centered by a sequence with low counts i.e. some later partitions are formed by sequences with only a single observed read. In samples with a greater sequencing depth we might see more of these singleton sequences or even sequences with a handful of counts that get their own partition. I think what's most important</p>
 </div>
 
 
