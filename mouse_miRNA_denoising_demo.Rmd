@@ -50,6 +50,8 @@ rowdata = rowData(seq_level_se_object) %>% data.frame()
 #renaming miRNA column for compatibility w/ denoising function 
 colnames(rowdata)[2] = 'miRNA_name'
 head(rowdata)
+
+#filter(rowdata, miRNA_name == my_miRNA) %>% nrow()
 ```
 
 Extract countdata from `seq_level_se_object`
@@ -92,6 +94,7 @@ tst = correct_isomiR_counts_v2(test_mirna = test_miRNA, rowdata=rowdata, countda
 After one iteration, we have the following `partition_df` object:
 ```{r}
 head(tst$partition_df)
+table(tst$partition_df$partition)
 ```
 
 The two partitions in the data have the following center sequences with associated read counts in sample 2:
@@ -124,6 +127,7 @@ cat("There are", max(tst_rmv_all$partition), "true sequences mapping to miRNA", 
 cat("\n The 16 true sequences mapping to miRNA", test_miRNA, "are\n")
 filter(tst_rmv_all, center == 1 )
 ```
+
 
 ```{r}
 colnames(countdata)=str_remove_all(colnames(countdata), "X")
@@ -173,5 +177,44 @@ cat("Each sample has the following number of partitions, which equates to the nu
 print(num_partitions_by_sample)
 ```
 
-From this we can definitely see that there is some variability in the number of partitions that exists within this test miRNA for each sample. I suspect that this has to do with varying sequencing depths across each of these samples in combination with partitions that are centered by a sequence with low counts i.e. some later partitions are formed by sequences with only a single observed read. In samples with a greater sequencing depth we might see more of these singleton sequences or even sequences with a handful of counts that get their own partition. \n
-I think what's most important 
+From this we can definitely see that there is some variability in the number of partitions that exists within this test miRNA for each sample. I suspect that this has to do with varying sequencing depths across each of these samples in combination with partitions that are centered by a sequence with low counts i.e. some later partitions are formed by sequences with only a single observed read. In samples with a greater sequencing depth we might see more of these singleton sequences or even sequences with a handful of counts that get their own partition. \n \n
+
+It might make more sense to only let sequences form their own partition if 1.) their abundance p-value falls below the user-defined threshold and 2.) their observed read count exceeds a certain threshold \n \n 
+
+I think what's most important is that we aren't identifying every sequence as a true isomiR and we also aren't identifyinng every sequence as a technical isomiR so it seems like things are moving in the right direction. \n \n
+
+
+Which sequences have been identified as a true sequence in at least one sample:
+```{r}
+true_sequences = vector()
+for(i in 1:length(tst_rmv_all_across_liver_samples)){
+  ts = filter(tst_rmv_all_across_liver_samples[[i]], center == 1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  true_sequences = c(true_sequences, ts)
+}
+
+true_sequences = unique(true_sequences)
+
+cat("Across all 5 liver samples there are", length(true_sequences), "unique true sequences that have been identified\n\n")
+```
+
+Which sequences have been identified as true sequences across all samples:
+```{r}
+#make a dataframe from the center sequences of the first sample:
+df = tst_rmv_all_across_liver_samples[[1]]  %>% filter(., center == 1) 
+new_colname = paste0("sample", 1)
+df[,new_colname] = rep(1, nrow(df))
+
+for(i in 2:length(tst_rmv_all_across_liver_samples)){
+  new_colname = paste0("sample", i)
+  df[,new_colname] = rep(0, nrow(df))
+  d = filter(tst_rmv_all_across_liver_samples[[i]], center==1)
+  for(seq in d$uniqueSequence){
+    if(seq %in% df$uniqueSequence){
+      df[df$uniqueSequence == seq, new_colname] =  1
+    }
+  }
+}
+
+filter(df, sample1 == 1) %>% filter(., sample2 ==1)  %>% filter(., sample3==1) %>% filter(., sample4==1) %>% filter(.,  sample5==1)
+
+```
