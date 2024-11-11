@@ -381,4 +381,78 @@ for(seq in isomiR_seqs){
 
 table(update_df$partition)
 
+all.equal(partition_df$partition, update_df$partition)
+
+partition_df = update_df
+```
+
+## Work on developing outer loop code, then combine with inner loop code 
+```{r}
+rm(list=ls())
+
+library(Biostrings)
+library(tidyverse)
+library(DESeq2)
+
+source("/scratch/hswan/thesis_isomiR_count_denoising/correct_technical_length_variant_functions.R")
+
+#function to load Ernesto's benchmark dataset because I'm tired of typing these lines of code over and over lol
+load_mouse_miRNA_data = function(){
+  load("/scratch/mmccall2_lab/miRNA_reference/Rdata/summarized_experiment_isomiR.RData")
+  isomiR_se_object = se_object
+  rm(se_object)
+  countdata = isomiR_se_object@assays@data$counts  %>% data.frame()
+  colnames(countdata) = str_remove_all(colnames(countdata), "X")
+  rowdata = rowData(isomiR_se_object) %>% data.frame()
+  colnames(rowdata) = c("uniqueSequence", "miRNA_name")
+  return(list(isomiR_se_object=isomiR_se_object, rowdata=rowdata, countdata=countdata))
+}
+
+data = load_mouse_miRNA_data()
+
+isomiR_se_object=data$isomiR_se_object
+countdata=data$countdata
+rowdata=data$rowdata
+```
+
+
+```{r}
+#Just making sure my data loaded correctly 
+head(rowdata)
+head(countdata)
+
+```
+
+
+```{r}
+unique_miRNAs = unique(rowdata$miRNA_name)
+test_miRNA = unique_miRNAs[1]
+cat("miRNA for code development is", test_miRNA, "\n")
+```
+
+#### Initialize partition_df outside of both loops
+```{r}
+#initialize partition_df bc we need alignments, transitions, to calculate transition_probs
+partition_df = cbind(rowdata, count=countdata[,2]) %>% data.frame() %>% filter(., miRNA_name == test_miRNA)
+#need to collapse weird replicates
+unique_seqs = unique(partition_df$uniqueSequence)
+
+partition_df$partition = rep(1, nrow(partition_df))
+partition_df$center = rep(0, nrow(partition_df))
+initial_center_seq = filter(partition_df, count==max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+partition_df$center[partition_df$uniqueSequence == initial_center_seq & partition_df$count == max(partition_df$count)] = 1
+
+head(partition_df)
+filter(partition_df, center ==  1)
+
+```
+
+#### need master lambdas, probabilty of each isomiR sequence being produced from each center sequence
+Initialize first - just one partition, one center sequence, also do outside the loops
+```{r}
+center_sequence = 
+lambda = rep(0, )
+transition_counts = initialize_transition_counts_matrix(5)
+
+
 ```
