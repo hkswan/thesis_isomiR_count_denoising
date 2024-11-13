@@ -288,9 +288,13 @@ estimate_isomiR_partition_membership = function(partition_df, transition_probs, 
         }
         cat("Letting isomiR sequences join newly formed partitions \n")
         for(i in isomiR_seqs){
-          l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist() %>% unname()
-          l = which(l == max(l))
-          update_df$partition[update_df$uniqueSequence == i] = l
+          l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist() 
+          l = which(l == max(l)) %>% names()
+          if(length(l) > 1){
+            l = l[1]
+          }
+          partition = update_df$partition[update_df$uniqueSequence == l]
+          update_df$partition[update_df$uniqueSequence == i] = partition
         }
         if(!(all.equal(partition_df$partition, update_df$partition) == TRUE)){
           partition_df = update_df 
@@ -311,14 +315,146 @@ estimate_isomiR_partition_membership = function(partition_df, transition_probs, 
       
     }
   }
-  return(list(center_seqs=center_seqs, isomiR_seqs=isomiR_seqs, results_df=results_df, partition_df=partition_df, iter_partitioning=iter_partitioning))
+  return(list(center_seqs=center_seqs, isomiR_seqs=isomiR_seqs, results_df=results_df, partition_df=partition_df, iter_partitioning=iter_partitioning, master_lambdas = master_lambdas))
 }
 ```
 
 ```{r}
-tst = estimate_isomiR_partition_membership(initial_partition_df, transition_probs=transition_probs, max_iter_partitioning = 2, OMEGA_A=0.05)
+tst = estimate_isomiR_partition_membership(initial_partition_df, transition_probs=transition_probs, max_iter_partitioning = 1, OMEGA_A=0.05)
+
 ```
 
+```{r}
+master_lambdas = tst$master_lambdas
+partition_df = tst$partition_df
+raw_p_values = vector()
+uniq_partitions = unique(partition_df$partition)
+```
+
+```{r}
+for(j in uniq_partitions){
+  cat("Working in partition", j, "\n")
+  n_j = filter(partition_df, partition == j & center == 1) %>% select(., count) %>% unlist() %>% unname()
+  cat("Observed read count of center sequence is", n_j, "\n")
+  partition_isomiRs = filter(partition_df, partition == j & center == 0 & count != 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  cat("There are", length(partition_isomiRs), "sequences in partition", j, "\n")
+  n_is = sapply(partition_isomiRs, function(x) return(partition_df$count[partition_df$uniqueSequence == x]))
+  names(n_is) = partition_isomiRs
+  lambdas = master_lambdas[[partition_df$uniqueSequence[partition_df$center==1 & partition_df$partition == j]]]
+  for(i in partition_isomiRs){
+    lambda = lambdas[[i]]
+    n_i = n_is[i]
+    num = ppois(n_i, n_j*lambda, lower.tail = F)
+    denom = 1-dpois(0, n_j*lambda)
+    p = c(num/denom)
+    names(p) = i
+    raw_p_values = c(raw_p_values, p)
+  }
+}
+
+adjusted_p_values = p.adjust(raw_p_values, method="BH")
+
+significant_seqs = names(adjusted_p_values[adjusted_p_values < 0.05])
+
+update_df = partition_df
+
+for(j in uniq_partitions){
+  cat("Determining if any sequences in partition", j, "should start their own partition \n")
+  partition_isomiRs = filter(partition_df, partition == j & center == 0 & count != 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  significant_partition_isomiRs = significant_seqs[significant_seqs %in% partition_isomiRs]
+  if(length(significant_partition_isomiRs) > 0){
+    cat("Length of significant_partition_isomiRs vector:", length(significant_partition_isomiRs), "\n")
+    cat("Identifying new center sequence \n")
+    new_center_seq = filter(partition_df, uniqueSequence %in% significant_partition_isomiRs) %>% filter(., count == max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+    new_center_seq = new_center_seq[1]
+    cat("Creating new partition\n")
+    new_partition = max(update_df$partition) + 1 
+    cat(new_partition, "\n")
+    update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
+    update_df$center[update_df$uniqueSequence == new_center_seq] = 1 
+  } else{
+    cat("No sequences to start new partition \n")
+  }
+}
+
+table(update_df$partition)
+filter(update_df, center == 1)
+
+center_seqs = update_df$uniqueSequence[update_df$center == 1]
+isomiR_seqs = update_df$uniqueSequence[update_df$center == 0 & update_df$count != 0]
+
+for(seq in center_seqs){
+  if(!(seq) %in% names(master_lambdas)){
+    new_alignments = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern = seq)
+    names(new_alignments) = isomiR_seqs
+    new_transitions = lapply(new_alignments, get_transitions)
+    new_lambdas = lapply(new_transitions, compute_lambda, transition_probs = transition_probs)
+    master_lambdas[[seq]] = new_lambdas
+  }
+}
+
+for(i in isomiR_seqs){
+  #print(i)
+  l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
+  l = which(l == max(l)) %>% names()
+  if(length(l) > 1){
+    l = l[1]
+  }
+  partition = update_df$partition[update_df$uniqueSequence == l]
+  #print(length(partition))
+  #print(length(update_df$partition[update_df$uniqueSequence==i]))
+  update_df$partition[update_df$uniqueSequence == i] = partition
+}
+
+partition_df = update_df
+center_seqs %in% names(master_lambdas)
+```
+
+
+```{r}
+
+estimate_isomiR_partition_membership_v2 = function(partition_df, transition_probs, omega_A, max_grping_iterations){
+  grping_iteration = 0 
+  no_change = 0 
+  while(grping_iteration < max_grping_iterations & no_change == 0){
+    if(max(partition_df$partition) == 1){
+      isomiR_seqs = filter(partition_df, center == 0 & count != 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+      center_seq = filter(partition_df, center ==1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+      alignments = lapply(isomiR_seqs, Biostrings:: pairwiseAlignment, pattern = center_seq)
+      names(alignments) = isomiR_seqs
+      master_alignments = list(alignments)
+      names(master_alignments) = center_seq
+      transitions = lapply(alignments, get_transitions)
+      master_transitions = list(center_seq=transitions)
+      lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs)
+      master_lambdas=list(center_seq=lambdas)
+    }
+    
+    uniq_partitions = unique(partition_df$partition)
+    
+    raw_p_values = vector()
+    for(j in uniq_partitions)
+    
+    grping_iteration = grping_iteration + 1
+  }
+  return(list(master_alignments=master_alignments, master_transitions=master_transitions, master_lambdas=master_lambdas))
+}
+
+```
+
+```{r}
+tst = estimate_isomiR_partition_membership_v2(initial_partition_df, transition_probs, 0.05, 1)
+```
+
+```{r}
+new_transition_probs = estimate_transition_probs(partition_df)
+
+```
+
+```{r}
+tst_2 = estimate_isomiR_partition_membership(partition_df, new_transition_probs, 1, 0.05)
+
+```
 
 Algorithm is going to have 2 steps - the transition probability estimation step that acts as the expectation step in a traditional EM algorithm and the partitioning step that acts like the maximization step in a traditional EM algorithm. We will iterate between the two steps until we reach a point where no new partitions are formed and no more isomiR sequences are moving between partitions. \n
 
