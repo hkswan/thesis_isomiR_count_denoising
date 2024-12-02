@@ -1,0 +1,235 @@
+---
+title: "Untitled"
+author: "Hannah Swan"
+date: "2024-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())
+```
+
+```{r}
+library(tidyverse)
+library(DESeq2)
+library(Biostrings)
+```
+
+```{r}
+source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_function.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/correct_technical_length_variant_functions.R")
+```
+
+```{r}
+mouse_data = load_mouse_miRNA_data()
+rowdata = mouse_data$rowdata
+countdata = mouse_data$countdata
+```
+
+```{r}
+count_df = rowSums(countdata) 
+count_df = cbind(rowdata, count=count_df) %>% data.frame()
+head(count_df)
+
+unique_miRNAs = unique(count_df$miRNA_name)
+num_isomiRs = sapply(unique_miRNAs, function(x) filter(count_df, miRNA_name == x) %>% nrow())
+num_isomiRs_freq = table(num_isomiRs)
+x = names(num_isomiRs_freq) %>% as.numeric() %>% log()
+plot(x, table(num_isomiRs), xlab = "Log of number of isomiRs", ylab="Number of miRNAs")
+```
+
+```{r}
+x = num_isomiRs[num_isomiRs >= 50] %>% sort()
+test_miRNA = names(x[1])
+cat("Test miRNA:", test_miRNA)
+#make initial partition
+partition_df = filter(count_df, miRNA_name == test_miRNA)
+partition_df$partition = rep(1, nrow(partition_df))
+#id initial center sequence
+initial_center_seq = filter(partition_df, count == max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+partition_df$center = rep(0, nrow(partition_df))
+partition_df$center[partition_df$uniqueSequence == initial_center_seq] = 1
+
+head(partition_df)
+filter(partition_df, center == 1)
+```
+
+\n\n Now we're going to begin the partitoning, so we need the transition probabilities  matrix that we calculated 
+```{r}
+matrix_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/transition_count_matrices")
+matrices = lapply(matrix_files, function(x) paste0("/scratch/hswan/thesis_isomiR_count_denoising/transition_count_matrices/", x) %>% readRDS())
+
+c  = matrices[[1]]
+for(i in 2:length(matrices)){
+  c = c+matrices[[i]]
+}
+
+transition_probs = c
+for(i in 1:nrow(c)){
+  transition_probs[i,] = transition_probs[i,]/sum(transition_probs[i,])
+}
+cat("Transition probabilities:\n")
+transition_probs
+```
+
+\n\n Now begin: first we need to get pairwise alignments between each isomiR sequence in partition and the center sequence
+```{r}
+isomiR_seqs = partition_df$uniqueSequence[partition_df$center == 0]
+alignments = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern = initial_center_seq)
+names(alignments) = isomiR_seqs
+head(alignments)
+```
+\n\n From alignments get transitions
+```{r}
+transitions = lapply(alignments, get_transitions)
+head(transitions, 3)
+```
+\n\n using transition object calculate lambdas
+```{r}
+lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs)
+```
+
+\n\n now compute abundance p-values using observed read counts and lambdas
+```{r}
+nj = filter(partition_df, center == 1) %>% select(., count) %>% unlist() %>% unname()
+nis = filter(partition_df, center == 0) %>% select(., count) %>% unlist()
+names(nis) = filter(partition_df, center == 0) %>% select(., uniqueSequence) %>% unlist() 
+p = vector(length = length(nis))
+names(p) = names(nis)
+for(seq in isomiR_seqs){
+  ni = nis[seq]
+  lambda = lambdas[[seq]]
+  num = ppois(ni-1, nj*lambda, lower.tail=F)
+  denom = 1-dpois(0, nj*lambda)
+  p[seq]=num/denom
+}
+#adjust for multiple testing 
+adjusted_p = p.adjust(p, method='BH')
+head(adjusted_p)
+```
+\n\n Now use abundance p-values to begin a new  partition
+```{r}
+significant_p = adjusted_p[adjusted_p < 0.05] 
+new_center_seq = names(significant_p[significant_p == min(significant_p)])
+#create copy of new partition for updating
+update_df=partition_df
+#create new partition
+new_partition = max(update_df$partition)+1
+update_df$center[update_df$uniqueSequence == new_center_seq] = 1
+update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
+
+#update list of isomiR_seqs
+isomiR_seqs = isomiR_seqs[isomiR_seqs != new_center_seq]
+#now  we need to decide where the sequences with sigificant p-values should go
+new_alignments = lapply(names(significant_p)[names(significant_p) != new_center_seq], Biostrings::pairwiseAlignment, pattern = new_center_seq)
+names(new_alignments) = names(significant_p)[names(significant_p) != new_center_seq]
+transitions = lapply(new_alignments, get_transitions)
+new_lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs)
+
+significant_seq = names(significant_p)[names(significant_p) != new_center_seq]
+master_lambdas = list(lambdas, new_lambdas)
+names(master_lambdas) = sort(unique(update_df$partition))
+for(seq in significant_seq){
+  l = lapply(master_lambdas, function(x) return(x[[seq]])) %>% unlist()
+  new_p = names(l)[which(l == max(l))]
+  update_df$partition[update_df$uniqueSequence==seq]=as.numeric(new_p)
+}
+
+table(update_df$partition)
+#save partition_df as the updated object:
+partition_df = update_df
+```
+
+## BEGIN SECOND ITERATION OF PARTITIONING
+
+\n\n Now we have 2 partitions so things are going to work a little differently as we calculate the abundance p-values going forward
+
+```{r}
+unique_partitions = unique(partition_df$partition) %>% as.numeric() %>% sort()
+cat("Unique partitons that we currently have:", unique_partitions, "\n")
+
+
+#initialize abundance p-values 
+p = vector(length=nrow(partition_df[partition_df$center==0,]))
+names(p) = partition_df$uniqueSequence[partition_df$center == 0]
+#iterate through partitions:
+for(j in unique_partitions){
+  nj = filter(partition_df, center==1 & partition == j) %>% select(., count)  %>% unlist() %>%  unname()
+  cat("Partition:", j, "\n")
+  cat("Observed read count of center sequence:", nj, "\n")
+  partition_isomiRs=filter(partition_df, partition == j & center ==  0) %>% select(., uniqueSequence) %>% unlist()
+  nis = filter(partition_df, uniqueSequence %in% partition_isomiRs) %>% select(., count) %>% unlist()
+  names(nis) = partition_isomiRs
+  #iterate through partition isomiRs:
+  if(length(partition_isomiRs) != 0){
+    for(i in partition_isomiRs){
+      lambda = master_lambdas[[j]][[i]]
+      ni = nis[[i]]
+      num = ppois(ni-1, nj*lambda, lower.tail=F)
+      denom = 1-dpois(0, nj*lambda)
+      p[i] = num/denom
+    }
+  }
+}
+
+#adjust for multiple testing
+adjusted_p = p.adjust(p, method="BH") 
+results_df = data.frame("adjusted_p"=adjusted_p)
+
+#now for each existing partition, determine if we need  to start a new partition
+update_df=partition_df
+
+for(j in unique_partitions){
+  partition_isomiRs = filter(partition_df, center == 0 & partition == j) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  significant_seq = adjusted_p[partition_isomiRs]
+  significant_seq = significant_seq[significant_seq < 0.05]
+  if(length(significant_seq) == 0){
+    cat("do not need to create a new partition from partition", j, "\n")
+  }
+  else{
+    new_center_seq = names(significant_seq)[significant_seq == min(significant_seq)]
+    cat("New center seq:", new_center_seq, "\n")
+    new_partition = max(as.numeric(update_df$partition)) + 1
+    cat("Creating partition", new_partition, "from partiton", j, "\n")
+    update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
+    update_df$center[update_df$uniqueSequence == new_center_seq] = 1
+  }
+}
+
+filter(update_df, center == 1)
+
+#now we need to decide where the sequences with significant p-values should go
+significant_seq = filter(results_df, adjusted_p < 0.05) %>%  row.names()
+significant_seq = significant_seq[!(significant_seq %in% update_df$uniqueSequence[update_df$center==1])]
+
+#update list of unique partitions
+unique_partitions = update_df$partition %>% as.numeric() %>% unique() %>% sort()
+for(j in unique_partitions){
+  cat(j, "\n")
+  print(j %in% names(master_lambdas))
+  if(!(j %in% names(master_lambdas))){
+    center = update_df$uniqueSequence[update_df$center==1 & update_df$partition==j]
+    cat("center sequence of partition", j, ":", center, "\n")
+    new_alignments = lapply(significant_seq, Biostrings::pairwiseAlignment, pattern=center)
+    names(new_alignments)=significant_seq
+    new_transitions = lapply(new_alignments, get_transitions)
+    new_lambdas = lapply(new_transitions, compute_lambda, transition_probs=transition_probs)
+    master_lambdas[[length(master_lambdas)+1]] = new_lambdas
+  }
+}
+names(master_lambdas) = unique_partitions
+
+#update partition:
+
+for(seq in significant_seq){
+  l = lapply(master_lambdas, function(x) return(x[[seq]])) %>% unlist()
+  new_p = names(l)[which(l == max(l))]
+  update_df$partition[update_df$uniqueSequence==seq] = new_p
+}
+table(update_df$partition)
+partition_df = update_df
+```

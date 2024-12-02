@@ -1,0 +1,57 @@
+---
+title: "Sanity check on different Poisson distribution R functions"
+author: "Hannah Swan"
+date: "November 19, 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+density_function = function(x, lambda){
+  d = (lambda^x)*exp(-lambda)/(factorial(x))
+  return(d)
+}
+
+cat("dpois(0,1):", dpois(0,1), "\n")
+cat("Probability of X = 0 assuming X ~ Poisson(1):", density_function(0, 1), "\n")
+```
+
+```{r}
+prob_x_leq_2 = sapply(0:2, density_function, lambda=1)
+prob_x_leq_2 = sum(prob_x_leq_2)
+cat("Probability of X less than or equal to 2, assuming X ~ Poisson(1):", prob_x_leq_2, "\n")
+cat("ppois(2, 1, lower.tail=T)", ppois(2,1), "\n")
+
+##simulation: 
+set.seed(1989)
+draws = rpois(1000000, 1)
+cat("Proportion of draws less than or equal to 2:")
+sum(draws <= 2)/length(draws)
+cat("\n")
+
+prob_x_greater_2 = 1-prob_x_leq_2
+cat("Probability of X greater than 2", prob_x_greater_2, "\n")
+cat("ppois(2, 1, lower.tail=F", ppois(2, 1, lower.tail=F), "\n")
+cat("Proportion of draws greater than 2:")
+sum(draws > 2)/length(draws)
+cat("\n")
+
+prob_x_geq_2 = prob_x_greater_2 + density_function(2, 1)
+cat("Probability X greater than or equal to 2, assuming X ~ Poisson(1):", prob_x_geq_2, "\n")
+cat("Proportion of draws greater than or equal to 2:")
+sum(draws >= 2)/length(draws)
+cat("\n")
+```
+
+```{r}
+ppois(-1, 1, lower.tail = F)
+ppois(0, 1, lower.tail = F) + dpois(0, 1)
+sum(draws >= 0)/length(draws)
+
+```
+

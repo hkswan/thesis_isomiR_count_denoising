@@ -1,4 +1,3 @@
-rm(list = ls())
 
 library(Biostrings)
 library(tidyverse)
@@ -31,12 +30,13 @@ transitions = lapply(alignments, get_transitions)
 
 transition_counts = initialize_transition_counts_matrix(5)
 
-for(t in transitions){
-  alignment_length = ncol(t)
-  for(i in 1:alignment_length){
-    trns = get_transition_at_idx(i, t)
-    x=trns$x
-    y=trns$y
+if(length(transitions) != 0){
+  for(t in transitions){
+    alignment_length = ncol(t)
+    for(i in 1:alignment_length){
+      trns = get_transition_at_idx(i, t)
+      x=trns$x
+      y=trns$y
     if(i == 1 & x != "-" & y != "-"){
       transition_counts[x,y]=transition_counts[x,y]+1
       transition_counts['-', '-'] = transition_counts['-', '-']+1
@@ -48,14 +48,11 @@ for(t in transitions){
       transition_counts[x,y]=transition_counts[x,y]+1
     }
     
+    }
   }
 }
 
-transition_probs = transition_counts
-for(i in 1:nrow(transition_probs)){
-  transition_probs[i,] = transition_probs[i,]/sum(transition_probs[i,])
-}
 
-filename = paste0(miRNA, "_transition_probs.RDS")
-saveRDS(transition_probs, paste0('/scratch/hswan/thesis_isomiR_count_denoising/transition_prob_matrices/', filename))
+filename = paste0(miRNA, "_transition_counts.RDS")
+saveRDS(transition_counts, paste0('/scratch/hswan/thesis_isomiR_count_denoising/transition_count_matrices/', filename))
 
