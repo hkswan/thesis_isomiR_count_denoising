@@ -233,3 +233,33 @@ for(seq in significant_seq){
 table(update_df$partition)
 partition_df = update_df
 ```
+
+### FUNCTION DEVELOPMENT
+\n\n Now we need to write a function to do all this
+The first step of the function is going to be initializing the appropriate partition_df object given the `rowdata`, the `count_df` object (an $i \times 1$ column vector) with one row for each unique sequence in the data and the element at position $i$ of the column vector being the sum of read counts across experiments for the $i^{th}$ sequence. Also takes transition probability matrix calculated outside of this function as an argument. 
+```{r}
+
+denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matrix, miRNA){
+  #initialize partition_df object 
+  cat("Creating initial partition_df object for miRNA", miRNA, "\n")
+  partition_df = cbind(rowdata, count=count_df) %>% data.frame() %>% filter(., miRNA_name == miRNA)
+  partition_df$partition = rep(1, nrow(partition_df))
+  partition_df$center = rep(0, nrow(partition_df))
+  
+  #id initial center sequence 
+  initial_center_seq = filter(partition_df, count==max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  
+  partition_df$center[partition_df$uniqueSequence == initial_center_seq] = 1
+  
+  
+  #return everything we can rn because we're in the development stages (ugh lol)
+  return(list(partition_df=partition_df, initial_center_seq=initial_center_seq))
+}
+
+```
+
+```{r}
+count_df=rowSums(countdata)
+tst = denoise_isomiR_counts(rowdata, count_df, transition_probs, test_miRNA)
+
+```
