@@ -48,7 +48,7 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
     
     for(j in unique_partitions){
       nj = filter(partition_df, partition == j & center == 1) %>% select(., count) %>% unlist() %>% unname()
-      cat("Partition", j, "center has observed read sequence", nj, "\n")
+      cat("Partition", j, "center sequence has observed read count", nj, "\n")
       partition_isomiRs = filter(partition_df, partition == j & center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
       cat("Partition", j, "contains", length(partition_isomiRs), "non center sequences. \n")
       for(i in partition_isomiRs){
