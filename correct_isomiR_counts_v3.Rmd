@@ -321,6 +321,9 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
          new_center_seq = filter(results_subset_df, sig == 1) %>% filter(., adj_p==min(results_subset_df$adj_p)) %>% row.names()
          new_partition = max(update_df$partition) + 1 
          cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
+         if(length(new_center_seq) > 1){
+           new_center_seq = sample(new_center_seq, 1)
+         }
         update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
         update_df$center[update_df$uniqueSequence == new_center_seq] = 1 
        }
@@ -359,6 +362,9 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
     for(i in significant_seqs){
       l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
       new_p = names(l[which(l==max(l))]) %>% as.numeric()
+      if(length(new_p) > 1){
+        new_p = sample(new_p, 1)
+      }
       update_df$partition[update_df$uniqueSequence == i] = new_p
     }
     
@@ -389,6 +395,17 @@ tst_3_iterations = denoise_isomiR_counts(rowdata, count_df, transition_probs, te
 tst_5_iterations = denoise_isomiR_counts(rowdata, count_df, transition_probability_matrix = transition_probs, test_miRNA, 0.05, 5, "BH")
 tst_6 = denoise_isomiR_counts(rowdata, count_df, transition_probability_matrix = transition_probs, test_miRNA, 0.05, 6, "BH")
 ```
+
+#ID new test miRNA and test function
+```{r}
+test_miRNA_2 = names(num_isomiRs[num_isomiRs >= 100  & num_isomiRs < 200][1])
+cat("Test miRNA #2:", test_miRNA_2, "\n")
+
+tst_miRNA_2 = denoise_isomiR_counts(rowdata, count_df, transition_probability_matrix = transition_probs, test_miRNA_2, 0.05, 1, "BH")
+tst_miRNA_2_5_iterations = denoise_isomiR_counts(rowdata, count_df, transition_probability_matrix=transition_probs, test_miRNA_2, 0.05, 5, "BH")
+tst_miRNA_2_10_iterations = denoise_isomiR_counts(rowdata, count_df, transition_probability_matrix=transition_probs, test_miRNA_2, 0.05, 10, "BH")
+```
+
 
 
 \n\n figuring out what the hell is going on with my function now 
