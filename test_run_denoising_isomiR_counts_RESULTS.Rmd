@@ -1,0 +1,143 @@
+---
+title: "Untitled"
+author: "Hannah Swan"
+date: "December 4, 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+```{r}
+source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+library(tidyverse)
+```
+
+## Load the partition objects that we have
+```{r}
+filepath = "/scratch/hswan/thesis_isomiR_count_denoising/test_run_isomiR_count_denoising"
+files = list.files(filepath)
+files = lapply(files, function(x) paste0("/scratch/hswan/thesis_isomiR_count_denoising/test_run_isomiR_count_denoising/", x, collapse=""))
+files = sapply(files, unlist)
+partition_obj = lapply(files, readRDS)
+```
+
+## Look at first partition_obj we loaded to see what we've got  
+```{r}
+miRNA = strsplit(files[1], "/")[[1]][6] %>% strsplit(., "_test_run_isomiR_count_denoising.Rds") %>% unlist()
+cat("partition_df object for", miRNA, "\n")
+
+partition = partition_obj[[1]]$partition_df
+
+cat("Algorithm ran for", partition_obj[[1]]$niter-1, "iterations on miRNA.\n")
+#Look at the first few rows:
+head(partition)
+
+cat("Number of sequences in each partition:\n")
+table(partition$partition)
+cat("Algorithm identified", max(partition$partition), "unique true isomiR sequences for miRNA", miRNA, "\n")
+cat("There were", nrow(partition), "total sequences mapping to this miRNA across all samples.\n")
+```
+
+## Now move to looking at things like the observed read counts of the center sequences
+```{r}
+filter(partition, center == 1)
+s = filter(partition, partition == 5) %>% filter(., center == 0) %>% select(., uniqueSequence) %>% unlist()
+filter(partition, partition==5)
+c = partition$uniqueSequence[partition$center == 1 & partition$partition == 5] 
+lapply(s, Biostrings::pairwiseAlignment, pattern = c)
+
+```
+
+## Look at the center sequences for the first 5 partitions:
+```{r}
+filter(partition, partition >= 1 & partition <= 5) %>% filter(., center == 1)
+cat("Pairwise alignments between center sequences 2-5 and the initial center sequence\n")
+s = filter(partition, partition >= 2 & partition <= 5) %>% filter(., center == 1) %>% select(., uniqueSequence) %>% unlist()
+c = partition$uniqueSequence[partition$center == 1 & partition$partition ==1]
+lapply(s, Biostrings::pairwiseAlignment, pattern = c)
+```
+
+## For each partition object, get the number of iterations that ran (i.e. did any of the miRNAs have all their true isomiRs id'd in 5 iterations or less??)
+```{r}
+num_iters = vector(length=length(partition_obj))
+for(i in 1:length(partition_obj)){
+  num_iters[i] = partition_obj[[i]]$niter
+}
+
+#ok so most of the miRNAs would have needed more iterations to remove all the 
+table(num_iters)
+
+num_partitions_created = vector(length=length(partition_obj))
+  for(i in 1:length(partition_obj)){
+    num_partitions_created[i] = partition_obj[[i]]$partition_df$partition %>% max()
+  }
+table(num_partitions_created)
+
+num_seqs_mapped = vector(length = length(partition_obj))
+for(i in 1:length(partition_obj)){
+  num_seqs_mapped[i] = nrow(partition_obj[[i]]$partition_df)
+}
+table(num_seqs_mapped)
+```
+
+
+## Need to look more closely at the results from miRNA that created partition_obj number 57 - only created one partition but not sure that was right 
+```{r}
+miRNA = strsplit(files[81], ".Rds") %>% unlist() %>% strsplit(., "/scratch/hswan/thesis_isomiR_count_denoising/test_run_isomiR_count_denoising/")
+miRNA = miRNA[[1]][[2]] %>% strsplit(., "_test_run_isomiR_count_denoising") %>% unlist()
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/transition_probs.Rds")
+
+mousedata = load_mouse_miRNA_data()
+rowdata = mousedata$rowdata
+countdata = mousedata$countdata
+count_df=rowSums(countdata)
+
+tst = denoise_isomiR_counts(rowdata, count_df, transition_probs, miRNA, 0.05, 5, "BH")
+```
+
+```{r}
+#only running for one iteration - pul out results_df:
+results_df = tst$results_df
+inf_raw_p_value_seqs =  filter(results_df, raw_p == Inf) %>% row.names()
+center_seq = tst$partition_df$uniqueSequence[tst$partition_df$center == 1]
+
+Biostrings::pairwiseAlignment(patter=center_seq, inf_raw_p_value_seqs[1])
+filter(tst$partition_df, uniqueSequence == inf_raw_p_value_seqs[1])
+
+#insanely small lambda makes sense when we're looking at a weird alignment like this 
+lambda = tst$master_lambdas[[1]][[inf_raw_p_value_seqs[1]]]
+cat("Lambda:", lambda, "\n")
+
+nj = filter(tst$partition_df, uniqueSequence==center_seq) %>% select(., count) %>% unlist()
+cat("nj:", nj, "\n")
+
+#dividing by 0
+ppois(0, lambda*nj, lower.tail=F)
+dpois(0, lambda*nj)
+
+
+#why is the function not correctly IDing a new center sequence? 
+unique_partitions = unique(tst$partition_df$partition) %>% sort()
+
+#partition isomiRs:
+partition_isomiRs = filter(tst$partition_df, partition == 1 & center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#get significant_seqs
+significant_seqs = filter(results_df, sig==1) 
+#get new center sequence, may need additional filtering step if there's a tie for sequence with the smallest p-value 
+new_center_seq = filter(significant_seqs, adj_p == min(adj_p))  %>% row.names()
+new_center_seq = filter(tst$partition_df, uniqueSequence %in% new_center_seq) %>% filter(., count==max(count)) %>% select(., uniqueSequence) %>% unlist()
+
+#create new partition
+new_partition = max(tst$partition_df$partition)+1
+update_df = tst$partition_df
+
+
+update_df$partition[update_df$uniqueSequence==new_center_seq] =  new_partition
+update_df$center[update_df$uniqueSequence==new_center_seq] = 1
+
+significant_seqs = filter(results_df, sig == 1) %>% row.names()
+center_seqs = update_df$uniqueSequence[update_df$center == 1]
+significant_seqs=significant_seqs[which(!(significant_seqs %in% center_seqs))]
+```

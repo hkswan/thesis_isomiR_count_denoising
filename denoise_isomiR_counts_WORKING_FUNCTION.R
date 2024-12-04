@@ -1,4 +1,4 @@
-rm(list=ls())
+
 
 library(Biostrings)
 library(tidyverse)
@@ -88,10 +88,11 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
       results_subset_df = results_df[partition_isomiRs,]
       # filter subset for significant p-values only if we have more than 0 rows in results_subset_df
       if(nrow(results_subset_df) > 0){
-        new_center_seq = filter(results_subset_df, sig == 1) %>% filter(., adj_p==min(results_subset_df$adj_p)) %>% row.names()
+        new_center_seq = filter(results_subset_df, sig == 1) %>% filter(., adj_p==min(adj_p)) %>% row.names()
         new_partition = max(update_df$partition) + 1 
         cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
         if(length(new_center_seq) > 1){
+          cat("Multiple candidates for new center sequence. Picking one at random.\n")
           new_center_seq = sample(new_center_seq, 1)
         }
         update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
@@ -146,5 +147,5 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
   #return everything we can rn because we're in the development stages (ugh lol)
   return(list(partition_df=partition_df, initial_center_seq=initial_center_seq, alignments=alignments, 
               transitions=transitions, results_subset_df=results_subset_df, raw_p=raw_p, results_df=results_df, 
-              master_lambdas=master_lambdas, niter=niter, no_change=no_change, update_df=update_df))
+              master_lambdas=master_lambdas, niter=niter, no_change=no_change, update_df=update_df, new_center_seq=new_center_seq))
 }
