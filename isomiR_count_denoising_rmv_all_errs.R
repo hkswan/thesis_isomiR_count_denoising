@@ -23,6 +23,6 @@ transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial
 
 obj = denoise_isomiR_counts(rowdata, count_df, transition_probs, x, 0.05, 100, "BH")
 
-filename = paste0(x, "_test_run_isomiR_count_denoising.Rds", collapse="")
-filepath = "/scratch/hswan/thesis_isomiR_count_denoising/test_run_isomiR_count_denoising/"
+filename = paste0(x, "_isomiR_count_denoising_rmv_all.Rds", collapse="")
+filepath = "/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs/"
 saveRDS(obj, paste0(filepath, filename, collapse=""))

@@ -66,14 +66,16 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
     cat("Adjusting for multiple testing and getting hypothesis testing results \n")
     
     if(adjust_method == "BH"){
+      cat("Adjusting for multiple testing using Benjamini-Hochberg procedure\n")
       adjusted_p = p.adjust(raw_p, method="BH")
       results = rep(0, length(adjusted_p))
       results[adjusted_p < omega_A] = 1
       results_df = cbind(raw_p=raw_p, adj_p=adjusted_p, sig = results) %>% data.frame()
     } else if(adjust_method == "Bonferroni"){
+      cat("Adjusting for multiple testing using Bonferroni\n")
       results = rep(0, length(raw_p))
       results[raw_p < omega_A/length(results)] = 1
-      results_df = cbind(raw_p=raw_p, sig = results) %>% data.frame()
+      results_df = cbind(adj_p=raw_p, sig = results) %>% data.frame()
     }
     
     #now we need to use the results to potentially ID a new center sequence for each existing partition
@@ -88,15 +90,18 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
       results_subset_df = results_df[partition_isomiRs,]
       # filter subset for significant p-values only if we have more than 0 rows in results_subset_df
       if(nrow(results_subset_df) > 0){
-        new_center_seq = filter(results_subset_df, sig == 1) %>% filter(., adj_p==min(adj_p)) %>% row.names()
-        new_partition = max(update_df$partition) + 1 
-        cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
-        if(length(new_center_seq) > 1){
-          cat("Multiple candidates for new center sequence. Picking one at random.\n")
-          new_center_seq = sample(new_center_seq, 1)
+        new_center_seq = filter(results_subset_df, sig == 1)
+        if(nrow(new_center_seq) > 0){
+          new_center_seq = filter(new_center_seq, adj_p==min(adj_p)) %>% row.names()
+          new_partition = max(update_df$partition) + 1 
+          cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
+          if(length(new_center_seq) > 1){
+            cat("Multiple candidates for new center sequence. Picking one at random.\n")
+            new_center_seq = sample(new_center_seq, 1)
+          }
+          update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
+          update_df$center[update_df$uniqueSequence == new_center_seq] = 1
         }
-        update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
-        update_df$center[update_df$uniqueSequence == new_center_seq] = 1 
       }
     }
     

@@ -140,4 +140,20 @@ update_df$center[update_df$uniqueSequence==new_center_seq] = 1
 significant_seqs = filter(results_df, sig == 1) %>% row.names()
 center_seqs = update_df$uniqueSequence[update_df$center == 1]
 significant_seqs=significant_seqs[which(!(significant_seqs %in% center_seqs))]
+
+new_alignments = lapply(significant_seqs, Biostrings::pairwiseAlignment, pattern=new_center_seq)
+names(new_alignments) = significant_seqs
+new_transitions = lapply(new_alignments, get_transitions)
+new_lambdas = lapply(new_transitions, compute_lambda, transition_probs=transition_probs)
+
+master_lambdas = list(tst$master_lambdas[[1]], new_lambdas)
+names(master_lambdas) = c(1,2)
+for(i in significant_seqs){
+  l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
+  new_p = names(which(l==max(l))) %>% as.numeric()
+  if(length(new_p) >1){
+    new_p = sample(new_p, 1)
+  }
+  update_df$partition[update_df$uniqueSequence==i] = new_p
+}
 ```

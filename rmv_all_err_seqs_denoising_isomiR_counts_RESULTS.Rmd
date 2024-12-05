@@ -1,0 +1,157 @@
+---
+title: "Remove all error sequences results"
+author: "Hannah Swan"
+date: "December 5, 2024"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+```{r}
+source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+```
+
+```{r}
+mousedata = load_mouse_miRNA_data()
+rowdata = mousedata$rowdata
+countdata=mousedata$countdata
+count_df = rowSums(countdata)
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/transition_probs.Rds")
+```
+
+```{r}
+
+files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs")
+files[1]
+
+#get the files for miRNAs that attempted to have all error sequences removed 
+
+#load partition_obj from all these files:
+partition_obj_1 = paste0("/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs/", files[[length(files)]], collapse="") %>% readRDS()
+
+miRNA = partition_obj_1$partition_df$miRNA_name[1]
+cat("Partition obj for miRNA,", miRNA, "\n")
+
+cat("Partitioning algorithm ran for", partition_obj_1$niter-1, "iterations \n")
+
+cat("Partitions and the amount of sequences in each one:\n")
+table(partition_obj_1$partition_df$partition)
+
+cat("Center sequence of each partition and associated observed read count across all samples \n")
+filter(partition_obj_1$partition_df, center == 1)
+
+obs_read_counts_table = data.frame(table(partition_obj_1$partition_df$count)) 
+colnames(obs_read_counts_table) = c("count",  "freq")
+ggplot(obs_read_counts_table, aes(x=count, y=freq)) + geom_point() + ggtitle("Frequency of obs read count vs. obs read count")
+```
+
+## Load all partition objects 
+```{r}
+file_paths = sapply(files, function(x) paste0("/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs/", x)) 
+partition_objs = lapply(file_paths, readRDS)
+```
+
+\n\n For each partition object, get the number of iterations it ran for 
+```{r}
+num_iters_ran = vector(length=length(file_paths))
+
+for(i in 1:length(partition_objs)){
+  num_iters_ran[i] = partition_objs[[i]]$niter
+}
+
+cat("Number of iterations run to remove all error sequences:\n")
+table(num_iters_ran)
+cat("Mean number of iterations run to remove all error sequences:", mean(num_iters_ran), "\n")
+```
+
+\n\n Also for each partition, get the number of partitions created
+```{r}
+num_partitions = lapply(partition_objs, function(x) return(max(x$partition_df$partition))) %>% unlist()
+cat("Number of true isomiR sequences identified for each miRNA \n")
+table(num_partitions)
+```
+
+\n\n Also curious what the proportion of true isomiR sequences identified by our method to the total number of sequences mapping to that miRNA is: 
+```{r}
+prop_true_isomiR = vector(length=length(partition_objs))
+for(i in 1:length(partition_objs)){
+  num = max(partition_objs[[i]]$partition_df$partition)
+  denom = nrow(partition_objs[[i]]$partition_df)
+  prop_true_isomiR[i] = num/denom
+}
+
+
+head(prop_true_isomiR)
+cat("Minimum proportion of true isomiR sequences identified:", min(prop_true_isomiR), "\n")
+cat("Maximum proportion of true isomiR sequences identified:", max(prop_true_isomiR), "\n")
+```
+
+## Curious to see if functions works when we specify we want to use Bonferroni for multiple testing 
+```{r}
+unique_miRNAs = unique(rowdata$miRNA_name)
+num_seqs_mapped = sapply(unique_miRNAs, function(x) filter(rowdata, miRNA_name ==x) %>% nrow())
+miRNA = num_seqs_mapped[num_seqs_mapped >= 10] %>% sort() %>% names()
+miRNA = miRNA[1]
+
+
+cat("Testing function with Bonferroni adjustment for miRNA", miRNA, "\n")
+
+tst = denoise_isomiR_counts(rowdata, count_df, transition_probs, miRNA, 0.05, 5, "Bonferroni")
+tst_BH = denoise_isomiR_counts(rowdata, count_df, transition_probs, miRNA, 0.05, 5, "BH")
+```
+
+\n\n Compare the 2
+```{r}
+cat("Bonferroni:\n")
+table(tst$partition_df$partition)
+cat("Benjamini-Hochberg:\n")
+table(tst_BH$partition_df$partition)
+```
+\n\n So same number of partitions results from using both methods for adjusting for multiple testing. 
+
+\n\n Number of iterations run for both:
+```{r}
+cat("Algorithm with Bonferroni adjustment for multiple testing ran for:", tst$niter-1, "iterations\n")
+cat("Algorithm with Benjamini-Hochberg adjustment for multiple testing ran for:", tst_BH$niter-1, "iterations \n")
+
+cat("Do we end up with the exact same partitions from the two methods?\n")
+if(all.equal(tst$partition_df$partition, tst_BH$partition_df$partition) == TRUE){
+  cat("Yes\n")
+}
+```
+
+\n \n Small number of sequences mapping to this miRNA so we can look at all rows in the partition_df object
+```{r}
+tst$partition_df
+
+```
+
+Look at the sequences and the alignments in each partition - are length variants / mixed type isomiRs more likely to get their own partition while sequence variants are more likely to stay in the same partition? 
+
+```{r, echo = TRUE}
+#look at partition 1 - 
+part_1_subset = filter(tst$partition_df, partition == 1) 
+
+Biostrings::pairwiseAlignment(pattern = part_1_subset$uniqueSequence[part_1_subset$center==1], part_1_subset$uniqueSequence[1])
+Biostrings::pairwiseAlignment(pattern = part_1_subset$uniqueSequence[part_1_subset$center==1], part_1_subset$uniqueSequence[2])
+Biostrings::pairwiseAlignment(pattern = part_1_subset$uniqueSequence[part_1_subset$center==1], part_1_subset$uniqueSequence[3])
+
+lambda = tst$master_lambdas[[1]][[part_1_subset$uniqueSequence[3]]]
+nj = part_1_subset$count[part_1_subset$center == 1]
+ni = part_1_subset$count[part_1_subset$uniqueSequence== part_1_subset$uniqueSequence[3]]
+
+#note that the following 2 lines are equivalent and dividing 1 by the other will always give 1. So we will never give a singleton sequence it's own partition under this model 
+ppois(0, nj*lambda, lower.tail=F)
+1-dpois(0, nj*lambda)
+
+#look at pairwise alignments between initial center sequence and the other center sequences: 
+center_seqs = tst$partition_df %>% filter(., center == 1) %>% select(., uniqueSequence) %>% unlist()
+initial_center_seq = tst$initial_center_seq
+center_seqs = center_seqs[center_seqs != initial_center_seq]
+
+Biostrings::pairwiseAlignment(pattern = initial_center_seq, center_seqs[1])
+Biostrings::pairwiseAlignment(pattern = initial_center_seq, center_seqs[2])
+Biostrings::pairwiseAlignment(pattern = initial_center_seq, center_seqs[3])
+```
