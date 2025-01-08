@@ -222,3 +222,20 @@ for(i in 1:length(datasets)){
 num_partitions = lapply(partition_objs, function(x) return(max(x$partition_df$partition)))
 table(unlist(num_partitions))
 ```
+
+```{r}
+results_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_08_2025/results/"
+results_files = list.files(results_path)
+results = lapply(results_files, function(x) paste0(results_path, x, collapse="") %>% readRDS())
+
+results[[1]]['num_partitions_created'] %>% table()
+false_positive_rates = results[[1]][['num_false_positives']]/(results[[1]][['num_false_positives']] + results[[1]][['num_true_negatives']])
+mean(false_positive_rates)
+plot(1:length(false_positive_rates), false_positive_rates, pch=19)
+abline(a=0.05, b=0, col='red')
+abline(a=mean(false_positive_rates), b=0,col='blue')
+abline(a=max(false_positive_rates), b=0, col="orange")
+
+fp_rates_df = data.frame(x=1:length(false_positive_rates), y=false_positive_rates)
+ggplot(fp_rates_df, aes(x=x, y=y)) + geom_point() + geom_abline(slope=0, intercept=0.05, col='red') + scale_y_continuous(limits=c(0, 0.07)) +xlab("Index of simulated dataset") +ylab("False positive rate") + ggtitle()
+```
