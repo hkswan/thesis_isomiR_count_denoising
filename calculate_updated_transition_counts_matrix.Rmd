@@ -1,0 +1,52 @@
+---
+title: "Calculate updated transition counts matrix"
+author: "Hannah Swan"
+date: "2024-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message=FALSE}
+library(Biostrings)
+library(tidyverse)
+
+```
+
+```{r}
+miRNA_level_transition_count_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/transition_count_matrices/update")
+miRNA_level_transition_counts = lapply(miRNA_level_transition_count_files, function(x) paste0("/scratch/hswan/thesis_isomiR_count_denoising/transition_count_matrices/update/", x, collapse="") %>% readRDS())
+```
+
+```{r}
+transition_counts = miRNA_level_transition_counts[[1]]
+for(i in 2:length(miRNA_level_transition_counts)){
+  transition_counts = transition_counts + miRNA_level_transition_counts[[i]]
+}
+
+transition_probs = transition_counts
+for(i in 1:nrow(transition_probs)){
+  transition_probs[i,] = transition_probs[i,]/sum(transition_probs[i,])
+}
+
+transition_probs
+
+```
+
+## Load original transition probabilities matrix
+```{r}
+og_transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+delta_transition_probs = transition_probs-og_transition_probs
+cat("Change in transition probabilities from initial to after first iteration:")
+print(delta_transition_probs)
+
+```
+
+
+```{r}
+#save updated transition probabilities matrix:
+saveRDS(transition_probs, "/scratch/hswan/thesis_isomiR_count_denoising/updated_transition_probs.Rds")
+```

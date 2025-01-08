@@ -1,0 +1,224 @@
+---
+title: "Untitled"
+author: "Hannah Swan"
+date: "2025-01-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/updated_transition_probs.Rds")
+source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_function.R")
+library(tidyverse)
+library(Biostrings)
+```
+
+```{r}
+mousedata = load_mouse_miRNA_data()
+rowdata = mousedata$rowdata
+countdata = mousedata$countdata
+count_df = rowSums(countdata)
+
+head(rowdata)
+head(count_df)
+```
+
+```{r}
+#get list of unique miRNAs 
+miRNAs = unique(rowdata$miRNA_name)
+#some of them have weird names and aren't true miRNAs because of how sRNAbench handless multi-mapping reads 
+#need to filter those guys out 
+idx = lapply(miRNAs, function(x) strsplit(x, "Mmu") %>% unlist() %>% length()) %>% unlist()
+true_miRNAs =  miRNAs[idx == 2]
+head(true_miRNAs)
+```
+
+```{r}
+count_df = cbind(rowdata, count=count_df) %>% data.frame() %>% filter(., miRNA_name %in% true_miRNAs)
+head(count_df)
+```
+
+```{r}
+#pick out a miRNA:
+mirna = true_miRNAs[1]
+cat("miRNA:", mirna, "\n")
+#pick out a center sequence
+center_seq = filter(count_df, miRNA_name == mirna) %>% filter(., count == max(count)) %>% select(., uniqueSequence) %>% unlist()
+cat("Center sequence:", center_seq, "\n")
+
+#initialize isomiR sequence vector
+isomiR_seqs = vector()
+
+#create list of potential sequence length differences:
+seq_length_diffs = 1:8
+#randomly sample sequence length difference 
+set.seed(1989)
+differences = vector()
+k = 0 
+while(length(isomiR_seqs) < 50 & k < 1000){
+  diff = sample(seq_length_diffs, 1)
+  cat("Difference:", diff, "\n")
+  differences = c(differences, diff)
+
+  ends = c("3p", "5p")
+
+  #for each difference:
+  seq = center_seq
+  for(i in 1:diff){
+    cat("i:", i, "\n")
+    #sample end of miRNA sequence:
+    end = sample(ends, 1)
+    cat("end:", end, "\n")
+    if(end == "3p"){
+      seq = substr(seq, start=1, stop=(nchar(seq)-1))
+    } else if(end == "5p"){
+      seq = substr(seq, 2, stop=nchar(seq))
+    }
+  
+  }
+  if(!(seq %in% isomiR_seqs)){
+    isomiR_seqs = c(isomiR_seqs, seq)
+  }
+  k=k+1
+}
+
+nj = filter(count_df, uniqueSequence==center_seq) %>% select(., count) %>% unlist() %>% unname()
+
+alignments = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern = center_seq)
+names(alignments) = isomiR_seqs
+transitions = lapply(alignments, get_transitions)
+lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs) %>% unlist()
+
+dist_means = lambdas*nj
+isomiR_counts = vector(length=length(dist_means))
+set.seed(1989)
+for(i in 1:length(dist_means)){
+  isomiR_counts[i] = rpois(1, dist_means[i])
+  noise = sample(0:sqrt(dist_means[i]),1)
+  isomiR_counts[i] = isomiR_counts[i]+noise
+}
+
+#make an artifcial count_df
+rowdata_sim = cbind(uniqueSequence=isomiR_seqs, miRNA_name=rep(mirna, length(isomiR_counts))) %>% data.frame()
+countdf_sim = cbind(rowdata_sim, count=round(isomiR_counts,0)) %>% data.frame()
+row.names(countdf_sim)=NULL
+head(countdf_sim)
+c = data.frame(uniqueSequence=center_seq, miRNA_name=mirna, count=nj)
+countdf_sim=rbind(c, countdf_sim)
+row.names(countdf_sim) = NULL
+head(countdf_sim)
+```
+
+```{r}
+countdf_sim = c(nj, isomiR_counts) %>% as.numeric()
+rowdata_sim = data.frame(uniqueSequence=center_seq, miRNA_name=mirna)
+rowdata_sim = rbind(rowdata_sim, data.frame(uniqueSequence=isomiR_seqs, miRNA_name=rep(mirna, length(isomiR_seqs)))) %>% data.frame()
+obj = denoise_isomiR_counts(rowdata_sim, countdf_sim, transition_probs, mirna, 0.05, 10, "BH")
+```
+
+Take the code from above and use it to simulate data from the null distribution consisting of only length variants that are shorter than the center sequence 
+```{r}
+simulate_length_variant_counts = function(miRNA, count_df, seed, transition_probs = NULL, add_noise=FALSE, max_k =  1000){
+  #first identify center sequence
+  center_seq = filter(count_df, miRNA_name == miRNA) %>% filter(., count==max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  #initialize isomiR_seqs vector:
+  isomiR_seqs = vector()
+  set.seed(seed)
+  #create vector of differences in length between center sequence and isomiR sequences to sample from:
+  #(this is currently set aribitrarily but we can change this)
+  seq_length_diffs = 1:7
+  ends = c("3p", "5p")
+  differences = vector()
+  k=0
+  cat("Generating length variant sequences \n")
+  while(length(isomiR_seqs) < 50 & k <= max_k){
+    diff = sample(seq_length_diffs, 1)
+    #cat("Difference:", diff, "\n")
+
+    #for each difference:
+    seq = center_seq
+    for(i in 1:diff){
+      #cat("i:", i, "\n")
+      #sample end of miRNA sequence:
+      end = sample(ends, 1)
+      #cat("end:", end, "\n")
+      if(end == "3p"){
+        seq = substr(seq, start=1, stop=(nchar(seq)-1))
+      } else if(end == "5p"){
+        seq = substr(seq, 2, stop=nchar(seq))
+      }
+  
+    }
+    if(!(seq %in% isomiR_seqs)){
+    isomiR_seqs = c(isomiR_seqs, seq)
+    differences = c(differences, diff)
+    }
+    k=k+1
+  }
+  
+  cat("Generating counts for length variant sequences \n")
+  nj = filter(count_df, uniqueSequence == center_seq) %>% select(., count) %>% unlist() %>% unname()
+  
+  cat("Alignments between center sequence and generated isomiR sequences \n")
+  alignments = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern=center_seq)
+  names(alignments) = isomiR_seqs
+  cat("Getting transitions\n")
+  transitions = lapply(alignments, get_transitions)
+  cat("Computing error distribution means\n")
+  lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs) %>% unlist()
+  error_dist_means = lambdas * nj 
+  
+  isomiR_sequence_counts = vector(length=length(isomiR_seqs))
+  names(isomiR_sequence_counts) = isomiR_seqs
+  cat("Drawing counts\n")
+  set.seed(seed)
+  for(seq in isomiR_seqs){
+    isomiR_sequence_counts[seq] = rpois(1, error_dist_means[seq])
+    if(add_noise){
+      sd = sqrt(error_dist_means[seq])
+      noise = sample(0:sd, 1)
+      isomiR_sequence_counts[seq] = isomiR_sequence_counts[seq]+noise
+    }
+  }
+  
+  cat("Assembling rowdata, countdata objects in appropriate format\n")
+  rowdata = data.frame(miRNA_name = rep(miRNA, length(isomiR_seqs)+1))
+  rowdata$uniqueSequence = c(center_seq, isomiR_seqs)
+  
+  counts = c(nj, isomiR_sequence_counts)
+  
+  return(list(center_seq=center_seq, differences=differences, isomiR_seqs=isomiR_seqs, isomiR_sequence_counts=isomiR_sequence_counts, rowdata=rowdata, counts=counts))
+  
+}
+
+obj=simulate_length_variant_counts(mirna, count_df, transition_probs=transition_probs, 1, add_noise=TRUE)
+
+rowdata_sim = obj$rowdata
+countdata_sim = obj$counts
+
+denoise_sim_obj = denoise_isomiR_counts(rowdata_sim, countdata_sim,  transition_probability_matrix =transition_probs, mirna, 0.05, 10, "BH")
+```
+
+Generate 100 datasets:
+```{r}
+datasets = list()
+for(i in 1:100){
+  cat("Dataset:", i, "\n")
+  datasets[[i]] = simulate_length_variant_counts(mirna, count_df, i, transition_probs=transition_probs, TRUE)
+}
+
+datasets_rowdata = lapply(datasets, function(x) return(x[["rowdata"]]))
+datasets_counts = lapply(datasets, function(x) return(x[["counts"]]))
+
+partition_objs = list()
+for(i in 1:length(datasets)){
+  partition_objs[[i]] = denoise_isomiR_counts(datasets_rowdata[[i]], datasets_counts[[i]], transition_probs, mirna, 0.05, 10, "BH")
+}
+
+num_partitions = lapply(partition_objs, function(x) return(max(x$partition_df$partition)))
+table(unlist(num_partitions))
+```

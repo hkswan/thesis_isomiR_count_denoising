@@ -1,0 +1,168 @@
+---
+title: "Simulating data to benchmark algorithm performance"
+author: "Hannah Swan"
+date: "2024-12-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())
+```
+
+## Load necessary packages
+```{r}
+library(Biostrings)
+library(tidyverse)
+
+```
+
+## Load necessary functions
+```{r}
+source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+```
+
+## Organize data
+```{r}
+mousedata = load_mouse_miRNA_data()
+rowdata = mousedata$rowdata
+countdata = mousedata$countdata
+countdf = rowSums(countdata)
+```
+
+## Load initial transition probabilities matrix
+```{r}
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+```
+
+
+```{r}
+unique_miRNAs = unique(rowdata$miRNA_name)
+x = sapply(unique_miRNAs, function(x) return(strsplit(x, "Mmu") %>% unlist() %>% length()))
+
+#getting true miRNAs, not weird miRNAs that were created by sequences multi-mapping 
+miRNAs = unique_miRNAs[x<3]
+cat("Number of miRNAs in dataset:", length(miRNAs), "\n")
+```
+
+
+```{r}
+miRNA = miRNAs[1]
+cat("miRNA", miRNA, "\n")
+
+#initialize partition_df: 
+partition_df = cbind(rowdata, count=countdf) %>% data.frame() %>% filter(., miRNA_name==miRNA)
+#get initial center sequence:
+initial_center_seq = cbind(rowdata, count=countdf) %>% data.frame() %>% filter(., miRNA_name == miRNA) %>% filter(., count == max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+
+partition_df$center = rep(0, nrow(partition_df))
+partition_df$center[partition_df$uniqueSequence == initial_center_seq] = 1
+filter(partition_df, center == 1)
+
+
+```
+
+
+### Count number of differences between center sequence and error/isomiR sequences 
+```{r}
+count_number_differences = function(center_seq, error_seq){
+  #first, get alignment 
+  alignment = Biostrings::pairwiseAlignment(pattern = center_seq, error_seq)
+  #get transitions obj
+  transition = get_transitions(alignment)
+  num_diff = 0
+  for(i in 1:ncol(transition)){
+    if(transition[1,i] != transition[2,i]){
+      num_diff = num_diff + 1 
+    }
+  }
+  return(num_diff)
+}
+
+num_diffs = sapply(partition_df$uniqueSequence[partition_df$uniqueSequence != initial_center_seq], count_number_differences, center_seq=initial_center_seq)
+
+simple_isomiRs = names(num_diffs[num_diffs == 1])
+
+alignments = lapply(simple_isomiRs, Biostrings::pairwiseAlignment, pattern = initial_center_seq)
+names(alignments) = simple_isomiRs
+transitions = lapply(alignments, get_transitions)
+lambdas = lapply(transitions, compute_lambda, transition_probs = transition_probs)
+lambdas = unlist(lambdas)
+nj = filter(partition_df, uniqueSequence == initial_center_seq) %>% select(., count) %>% unlist() %>% unname()
+means = lambdas * nj
+set.seed(1989)
+#create a list of simulated counts of length 100:
+counts_list = list()
+for(i in 1:100){
+  counts_list[[i]] = c(sapply(means, function(x) rpois(1,x)), nj)
+}
+
+simulated_rowdata = cbind(uniqueSequence = simple_isomiRs, miRNA_name=rep(miRNA, length(simple_isomiRs))) %>% data.frame()
+simulated_rowdata = rbind(simulated_rowdata,partition_df[partition_df$uniqueSequence==initial_center_seq, c("uniqueSequence", 'miRNA_name')])
+
+tst_list = list()
+for(i in 1:length(counts_list)){
+  tst_list[[i]] = denoise_isomiR_counts(simulated_rowdata, counts_list[[i]], transition_probs, miRNA, 0.05, 10, "BH")
+}
+
+max_partitions = lapply(tst_list, function(x) return(x$partition_df$partition %>% max())) %>% unlist()
+
+```
+
+```{r}
+false_positive_rate_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/simulate_null_data")
+
+false_positive_rate_vectors = lapply(false_positive_rate_files, function(x) paste0("/scratch/hswan/thesis_isomiR_count_denoising/simulate_null_data/", x) %>% readRDS())
+
+names(false_positive_rate_vectors) = sapply(false_positive_rate_files, function(x) c(strsplit(x,  "_false") %>% unlist())[1])
+
+false_positive_rate_df = matrix(0, nrow=length(false_positive_rate_vectors), ncol=100)
+for(i in 1:length(false_positive_rate_vectors)){
+  false_positive_rate_df[i,] = false_positive_rate_vectors[[i]]
+}
+false_positive_rate_df=data.frame(false_positive_rate_df)
+row.names(false_positive_rate_df) = names(false_positive_rate_vectors)
+
+false_positive_rate_df[1:5, 1:5]
+
+
+y = apply(false_positive_rate_df, 1,  mean)
+
+y_df = data.frame(x=1:length(y), y)
+ggplot(y_df, aes(x=x, y=y)) + geom_point() + geom_abline(slope=0, intercept=0.05, col='red') + xlab("miRNA idx") + ylab("Avg false positive rate across 100 datasets")
+plot(1:length(y), y, xlab="miRNA idx", ylab="Avg false positive rate across 100 datasets")
+
+boxplot(y)
+
+ggplot(data.frame(y), aes(y=y)) + geom_boxplot()
+```
+
+```{r}
+partition_obj_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/partition_objs/Mmu-Mir-1948_5p*")
+
+my_objs = partition_obj_files[grepl("_499", partition_obj_files)]
+readRDS(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/partition_objs/Mmu-Mir-1948_5p*/",partition_obj_files[3], collapse="")) %>% tibble()
+
+num_partitions_created = vector()
+fp_rate = vector()
+for(i in 1:length(my_objs)){
+  df = readRDS(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/partition_objs/Mmu-Mir-1948_5p*/",partition_obj_files[i], collapse="")) %>% data.frame()
+  num_partitions_created = c(num_partitions_created, max(df$partition))
+  fp_rate = c(fp_rate, max(df$partition)/nrow(df))
+}
+
+fp_rate
+table(fp_rate)
+table(num_partitions_created)
+
+
+```
+
+I'm not sure that's the results we should be getting to be honest  
+```{r}
+
+
+```

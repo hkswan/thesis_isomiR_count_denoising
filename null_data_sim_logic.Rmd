@@ -1,0 +1,174 @@
+---
+title: "Null Data Simulation Explanation"
+author: "Hannah Swan"
+date: "2024-12-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following is my idea of how to simulate data from the error distribution to evaluate model performance. Under the null hypothesis, there is exactly one center sequence, or true sequence, for a given miRNA. All other sequences mapping to that miRNA are error sequences that have arisen due to technical variation in the sequencing process. Therefore, if we are generating read counts for sequences from the assumeed error model, we should be finding only one partiton for sequences mapping to the same miRNA. 
+\n
+\n
+
+
+Suppose we have some miRNA with multiple sequences mapping to it. We've identified a center sequence, $j$ for the given miRNA, where $j$ is the most abundant sequence mapping to that miRNA. Suppose that $i$ is another sequence mapping to the same miRNA as center sequence $j$. Let $\lambda_{ji}$ denote the probability of generating a read of sequence $i$ from sequence $j$. We assume that transitions between nucleotides are independent within reads and between reads, therefore $\lambda_{ji}$ is given by the product of the individual transition probabilities along the length of the alignment of center sequence $j$ to sequence $i$. That is, 
+$$\lambda_{ji} = \prod_{l=1}^L(\text{Pr}(j_{l} \rightarrow i_{l})).$$
+\n
+\n
+
+$\text{Pr}(j_{l} \rightarrow i_{l})$ is the probability that the nucleotide at position $l$ in sequence $j$ is read as the nucleotide at position $l$ in sequence $i$.
+\n
+\n
+
+If $n_j$ is the observed read count of center sequence $j$, then under the error model, the read count of sequence $i$ $X_i$ is Poisson distributed with mean $\lambda_{ji}n_j: X_{i} \sim \text{Pois}(\lambda_{ji}*n_j)$. We have an estimated transition probability matrix from creating initial partitions in Ernesto's dataset, so we can use that to calculate realistic $\lambda_{ji}$ values to use to calculate the means of the Poisson distributions and then draw from those distributions. 
+
+### Step 1: From Ernesto's dataset calculate initial transition probabilities matrix 
+### Step 2: Select a miRNA from Ernesto's benchmark dataset
+```{r, echo=FALSE}
+
+suppressMessages(source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R"))
+
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+
+mousedata = load_mouse_miRNA_data()
+rowdata=mousedata$rowdata
+countdata=mousedata$countdata
+count_df=rowSums(countdata)
+
+unique_miRNAs = unique(rowdata$miRNA_name)
+true_miRNAs = sapply(unique_miRNAs, function(x) strsplit(x, "Mmu") %>% unlist() %>% length()-1)
+true_miRNAs = names(true_miRNAs[true_miRNAs==1])
+cat("There are", length(true_miRNAs), "miRNAs in Ernesto's benchmark dataset. \n")
+
+miRNA = true_miRNAs[1]
+cat("We will simulate null data and evaluate algorithm performance for miRNA", miRNA, "\n")
+```
+
+### Step 3: Identify "simple" isomiRs 
+We can definitely do the next part with all error sequences mapping to our chosen miRNA but for computational speed I think it'll be better to pair down the number of error sequences we have in our simulated dataset. I also initially wanted to start with simulating data from the error distribution under the null hypothesis for isomiRs that are "close" to the center sequence we've identified. I've defined a "simple" isomiR as an isomiR that has a difference from the center sequence at only 1 position along the alignment between the error sequence and the center sequence. The following function counts the number of differences between the error sequence and the center sequence and therefore lets us identify the isomiR sequences that are "closest" to the error sequences. 
+```{r}
+source("/gpfs/fs2/scratch/hswan/thesis_isomiR_count_denoising/function_dev/count_number_differences_FUNCTION.R")
+
+cat("ID center sequence:\n")
+center_seq = cbind(rowdata, count = count_df) %>% filter(., miRNA_name==miRNA) %>% filter(., count==max(count)) %>% select(., uniqueSequence) %>% unlist()
+
+cat("ID error sequences:\n")
+error_seq = rowdata %>% filter(., miRNA_name==miRNA & uniqueSequence != center_seq) %>% select(., uniqueSequence) %>% unlist()
+
+cat("Get number of differences between each error sequence and center sequence:\n")
+num_diffs = sapply(error_seq, count_number_differences, center_seq=center_seq)
+names(num_diffs) = error_seq
+
+table(num_diffs)
+
+simple_isomiRs = names(num_diffs[num_diffs==1])
+```
+
+### Step 4: Aligment between simple isomiRs and center sequence, get transition objects from alignments, calculate lambdas using transition objects and initial transition probability matrix
+Very similar to steps we take when we're actually performing the count denoising 
+```{r}
+alignments = lapply(simple_isomiRs, Biostrings::pairwiseAlignment, pattern=center_seq)
+names(alignments) = simple_isomiRs
+transitions = lapply(alignments, get_transitions)
+lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probs) %>% unlist()
+```
+
+### Step 5: Get observed read count of center sequence, calculate means of error distributions for each simple isomiR sequence
+```{r}
+nj = cbind(rowdata, count=count_df) %>% filter(., uniqueSequence==center_seq) %>% select(., count) %>% unlist() %>% unname()
+error_dist_means = nj*lambdas
+head(error_dist_means)
+```
+The idea is that if we generate count data from the error distribution and then pass it to the isomiR count denoising algorithm, then we should only be creating 1 partition per dataset. If we're creating more partitions, then we have false positives. This is okay because we might create a partition purely due to change, but if it happens at a high rate, then the algorithm is not working as we would expect. Also, I want to add a little bit of noise to the simulated counts so we will do that in the following way. We know that mean = variance for poisson distributed random variables. Therefore, we can take the square root of the error distribution means we calculated and get the standard deviations of those error distributions. I then sample from a Uniform(-sd, sd) distribution after rounding to get the noise that I will add to my Poisson distributed counts
+```{r, echo=TRUE}
+cat("Generate draws from the error distributions:")
+set.seed(1989)
+x = sapply(error_dist_means, function(y) rpois(1, y))
+sd = sapply(error_dist_means, sqrt)
+noise = sapply(sd, function(y) return(sample(-y:y, 1)))
+draws = x+noise
+
+simulated_count_df = c(draws, nj)
+cat("First 6 observations of simulated row data:\n")
+head(simulated_count_df)
+cat("\n Compare to error distribution means:\n")
+head(error_dist_means)
+simulated_rowdata = filter(rowdata, uniqueSequence %in% simple_isomiRs) %>% rbind(., filter(rowdata, uniqueSequence == center_seq)) %>% data.frame()
+```
+
+### Step 6: Pass simulated data to denoise_isomiR_counts function 
+```{r}
+tst = denoise_isomiR_counts(simulated_rowdata, simulated_count_df, transition_probs, miRNA, 0.05, 10, "BH")
+```
+
+\n
+
+The number of false positives for the simulated dataset is the number of unique partitions we created minus 1, because we should be creating that initial partition.
+
+Suppose we have $D$ sequences mapping to a given miRNA. The maximum number of partitions we can create is $D$, one partition for each sequence. This is equivalent to conducting an isomiR-level analysis without any denoising. The minimum amount of partitions we can create is $1$, because we begin by creating a single partition for that given miRNA. If the algorithm ends at this stage, all sequences end in the same partition and the subsequent downstream analysis will be equivalent to the miRNA-level analysis. 
+\n
+
+In this case there is 1 true positive and d-1 false positives, where d is the total number of partitions we created. The false positive rate is therefore $\frac{d-1}{D-1}$. 
+```{r}
+cat("Total number of partitions created", max(tst$partition_df$partition), "\n")
+cat("Number of false positives:", max(tst$partition_df$partition)-1, "\n")
+cat("False positive rate:", (max(tst$partition_df$partition)-1)/(length(simple_isomiRs)-1))
+```
+
+We can create as many simulated countdata sets as we want according to step 5 and then evaluate as we did in step 6 and calculate the false positive rate among other things to give us an idea of the false positive rate in identifying center sequences.
+
+### What happens if we double the read count of one of the sequences?
+```{r}
+set.seed(13)
+seq = sample(simple_isomiRs, 1)
+count_df_signal = simulated_count_df
+count_df_signal[which(simulated_rowdata$uniqueSequence==seq)] = round(2*count_df_signal[which(simulated_rowdata$uniqueSequence==seq)],0)
+
+tst_signal = denoise_isomiR_counts(simulated_rowdata, count_df_signal, transition_probs, miRNA, 0.05, 10, "BH")
+```
+
+Randomly select a set of sequences to add signal to simulated read counts
+```{r}
+set.seed(13)
+true_pos_seqs = sample(simple_isomiRs, 10)
+count_df_signal = simulated_count_df
+count_df_signal[which(simulated_rowdata$uniqueSequence %in% true_pos_seqs)] = round(1.6*count_df_signal[which(simulated_rowdata$uniqueSequence %in% true_pos_seqs)], 0)
+
+tst_signal_5 = denoise_isomiR_counts(simulated_rowdata, count_df_signal, transition_probs, miRNA, 0.05, 10, "BH")
+
+partition_df = tst_signal_5$partition_df
+
+for(i in 1:length(true_pos_seqs)){
+  cat(true_pos_seqs[i], "\n")
+  print(true_pos_seqs[i] %in% partition_df$uniqueSequence[partition_df$center==1])
+}
+
+#the only center sequences should be the initial center sequence plus the 5 sequences in the true_pos_seqs vector:
+partition_df$true_pos_seq = rep(0, nrow(partition_df))
+
+partition_df$true_pos_seq[partition_df$uniqueSequence %in% true_pos_seqs] = 1
+partition_df$true_pos_seq[partition_df$uniqueSequence == center_seq] = 1
+filter(partition_df, true_pos_seq==1)
+
+#false negative is any sequence that does not have its own partition but should:
+false_negatives = filter(partition_df, true_pos_seq == 1 & center == 0) %>% nrow()
+#true negative is any sequence that does noot have its own partition and should not:
+true_negatives = filter(partition_df, true_pos_seq==0  & center==0) %>% nrow()
+#true positive is any sequence that does have its own partition and should:
+true_positives = filter(partition_df, true_pos_seq == 1 & center == 1) %>% nrow()
+#false positive is any sequence that has its own partition and should not:
+false_positives = filter(partition_df, true_pos_seq== 0 & center  == 1) %>% nrow()
+
+fn_rate = false_negatives/(false_negatives+true_positives)
+tn_rate = true_negatives/(true_negatives+false_positives)
+tp_rate = 1-fn_rate
+fp_rate = 1-tn_rate
+
+cat("False negative rate:", fn_rate, "\n")
+cat("True negative rate:", tn_rate, "\n")
+cat("True positive rate:", tp_rate, "\n")
+cat("False positive rate:", fp_rate, "\n")
+```

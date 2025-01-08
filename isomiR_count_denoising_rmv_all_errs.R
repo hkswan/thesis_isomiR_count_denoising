@@ -1,7 +1,13 @@
+#R script for denoising isomiR counts intended to be used in a bash script to create an array of jobs to run in parallel 
+#one job for each miRNA 
 
+#load working function for denoising isomiR counts 
 source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+
+#get arguments from command line 
 args = commandArgs(trailingOnly=TRUE)
 idx = as.numeric(args[1])
+#print out miRNA index
 cat("miRNA_idx:", idx, "\n")
 
 #load mouse data
@@ -19,10 +25,12 @@ unique_miRNAs = unique(rowdata$miRNA_name)
 x = unique_miRNAs[idx]
 
 #load transition probability matrix
-transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/updated_transition_probs.Rds")
 
+#denoise isomiR counts, store function output 
 obj = denoise_isomiR_counts(rowdata, count_df, transition_probs, x, 0.05, 100, "BH")
 
-filename = paste0(x, "_isomiR_count_denoising_rmv_all.Rds", collapse="")
-filepath = "/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs/"
+#save function output to .Rds file 
+filename = paste0(x, "_isomiR_count_denoising_rmv_all_iter_2.Rds", collapse="")
+filepath = "/scratch/hswan/thesis_isomiR_count_denoising/rmv_all_err_seqs/iter2"
 saveRDS(obj, paste0(filepath, filename, collapse=""))

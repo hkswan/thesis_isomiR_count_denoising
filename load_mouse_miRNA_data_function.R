@@ -10,3 +10,9 @@ load_mouse_miRNA_data = function(){
   return(list(isomiR_se_object=isomiR_se_object, rowdata=rowdata, countdata=countdata))
 }
 
+get_true_mouse_miRNAs = function(mouse_rowdata){
+  miRNAs = unique(mouse_rowdata$miRNA_name)
+  idx = lapply(miRNAs, function(x) strsplit(x, "Mmu") %>% unlist() %>% length()) %>% unlist()
+  true_miRNAs =  miRNAs[idx == 2]
+  return(true_miRNAs)
+}
