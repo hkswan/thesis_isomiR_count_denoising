@@ -5,8 +5,8 @@
 #output is a 2 x L dimensional matrix where L is the length of the alignment 
 #output intended to be used as input in computing lamba for a given center sequence / isomiR sequence pair
 get_transitions = function(alignment){
-  pattern = Biostrings::alignedPattern(alignment)
-  subject = Biostrings::alignedSubject(alignment)
+  pattern = Biostrings::alignedPattern(alignment) %>% as.character()
+  subject = Biostrings::alignedSubject(alignment) %>% as.character()
   alignment_length = nchar(pattern)
   transitions = sapply(1:alignment_length, function(x) return(c(Biostrings::substr(pattern, x, x), Biostrings::substr(subject, x,x))))
   return(transitions)

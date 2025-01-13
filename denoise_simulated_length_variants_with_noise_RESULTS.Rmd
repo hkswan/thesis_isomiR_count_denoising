@@ -1,0 +1,162 @@
+---
+title: "Denoise simulated length variants with noise results"
+author: "Hannah Swan"
+date: "2025-01-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+First, begin by loading necessary functions that we've written plus packages that we might need to analyze results 
+```{r, echo=FALSE}
+source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_function.R")
+library(tidyverse)
+library(DESeq2)
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+```
+
+### Description of simulations that generated the length variant isomiR counts 
+
+\n
+
+We began with Ernesto's benchmark dataset with contains isomiR-level expression data from 2 different mouse tissues combined in various ratios. After aligning to miRGeneDB reference genome using sRNAbench there are 1007 unique "miRNAs" present in the dataset. However, some isomiR sequences map to multiple miRNAs. Depending on the combination of miRNAs a given read maps to, this might generate a new "miRNA" name that is not a true miRNA. Therefore, we considered sequences mapping only to true miRNAs in the dataset. After filtering, this left us with 759 miRNAs. 
+```{r}
+mousedata = load_mouse_miRNA_data()
+```
+
+```{r}
+cat("mousedata object contains the following items:", names(mousedata), "\n")
+rowdata = mousedata$rowdata
+countdata = mousedata$countdata
+
+cat("rowdata dimensions", dim(rowdata), "\n")
+cat("countdata dimensions", dim(countdata), "\n")
+
+cat("Number of unique miRNAs pre-filtering:", length(unique(rowdata$miRNA_name)), "\n")
+
+true_miRNAs = get_true_mouse_miRNAs(rowdata)
+cat("Number of true unique miRNAs post-filtering:", length(true_miRNAs), "\n")
+```
+
+For each miRNA, we identify an initial center sequence according to our definition. We sum the reads for each sequence across all samples. Then, for a given miRNA we identify the center sequence as the sequence mapping to the given miRNA with the greatest observed read count. From the center sequence we then generate length variant sequences. For example, consider the following miRNA with identified center sequence:
+```{r, echo=FALSE}
+mirna = true_miRNAs[1]
+cat("miRNA:", mirna, "\n")
+
+counts = rowSums(countdata)
+
+count_df = cbind(rowdata, count=counts) %>% data.frame()
+center_seq = filter(count_df, miRNA_name == mirna) %>% filter(., count==max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+cat("Center sequence:", center_seq, "\n")
+```
+
+First, we can sample the number of differences between the isomiR sequence and the center sequence we've identified from a uniform distribution. We let $1$ be the minimum number of differences between the center sequence and the isomiR sequence and $7$ be the largest number of differences. Frankly, $7$ is probably too big and we would consider something with $7$ nucleotides missing to just be a fragment or throw it out entirely. 
+```{r}
+set.seed(1989)
+num_differences = sample(1:7, 1) 
+cat("Number of differences:", num_differences, "\n")
+```
+
+The differences in length can occur at either the 5p end or the 3p end. For each removal of a nucleotide, we sample the end it will occur at by flipping a coin. 
+```{r}
+
+set.seed(13)
+for(i in 1:num_differences){
+  x = sample(c("3p", "5p"), 1)
+  cat("end:",x, "\n")
+}
+
+```
+First, we draw 5p. That means we will remove the first nucleotide at the 5p end of the center sequence for our miRNA. Next, we draw 3p. That means the second nucleotide we are removing to create a length variant will be removed from the 3p end of the center sequence. This then generates the length variant isomiR sequence that will appear in our simulated dataset for the given miRNA: 
+```{r}
+seq = center_seq
+set.seed(13)
+for(i in 1:num_differences){
+  x = sample(c("3p", "5p"), 1)
+  if(x == "3p"){
+    seq = substr(seq, start=1, stop=nchar(seq)-1)
+  } else if(x=="5p"){
+    seq = substr(seq, start = 2, stop=nchar(seq))
+  }
+}
+
+Biostrings::pairwiseAlignment(pattern=center_seq, seq)
+```
+
+We can repeat this process of sampling differences and the ends from which we remove the nucleotides to generate those differences to ultimately generate a set of length variant isomiR sequences. Then, the next step is simulating read counts for these isomiR sequences so we have a full simulated datatset that we can pass to our algorithm. Under our error model, we assume that read counts of technical isomiR sequences follow a Poisson distribution with parameter $\mu = n_j \lambda_{ji}$, where $n_j$ is the observed read count of the center sequence and $\lambda_{ji}$ is the probability of generating a read of sequence $i$ from sequence $j$. We calculate this $lambda_{ji}$ by aligning sequence $i$ to center sequence $j$, getting the individual transitions, and taking the product of the individual transition probabilities.
+```{r}
+align = Biostrings::pairwiseAlignment(pattern = center_seq, seq)
+transition = get_transitions(align)
+lambda = compute_lambda(transition, transition_probs)
+cat("Lambda:", lambda, "\n")
+nj = filter(count_df, uniqueSequence == center_seq) %>% select(., count) %>% unlist() %>% unname()
+cat("nj:", nj, "\n")
+cat("nj times lambda:", nj*lambda, "\n")
+mean = nj*lambda
+```
+
+
+Finally, we draw a read count for the length variant isomiR sequence:
+```{r}
+set.seed(0208)
+y = rpois(1, mean)
+cat("read count:", y, "\n")
+```
+We can also add a bit of noise to the draw by sampling noise from a uniform distribution. I made the decision to use the uniform distribution and only addition so that I make sure I have draws within the domain of the Poisson distribution for the denoising algorithm. We know that the mean and the variance of a Poisson distribution are equal. I draw a number between 0 and the standard deviation of the error distribution and add it to the read count we drew.
+```{r}
+set.seed(1997)
+noise = sample(0:sqrt(mean), 1)
+cat("Noise:", noise, "\n")
+y_w_noise = y + noise
+cat("read count with added noise:", y_w_noise, "\n")
+```
+
+In this way ,we can generate a simulated read count with or without additional noise from the error distribution from each of the length variant isomiR sequences we generated. This allows us to put together a fully simulated dataset of length variant isomiR sequences + read counts we simulated according to our assumed error model with added noise. We can generate as many datasets as we want for each miRNA. 
+```{r, echo = FALSE}
+no_noise_data_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_NO_NOISE")
+data_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_NO_NOISE"
+sample_datasets = paste0(data_file_path, "/", no_noise_data_files[1]) %>% readRDS()
+
+cat("Number of datasets:", length(sample_datasets), "\n")
+cat("Each element of sample dataset list contains:", names(sample_datasets[[1]]), "\n")
+cat("Row data to be used in isomiR count denoising:\n")
+sim_rowdata = sample_datasets[[1]]$rowdata
+head(sim_rowdata)
+cat("Number of sequences in simulated rowdata:", nrow(sim_rowdata), "\n")
+sim_counts = sample_datasets[[1]]$counts
+cat("Count data to be denoised via isomiR count denoising algorithm\n")
+head(sim_counts)
+```
+
+For each simulated dataset, since we simulated directly from the error distribution with some added noise, we should create only 1 partition of isomiR sequences. The center sequence should be the center sequence we manipulated to generate the isomiR sequences and associated read counts. Any additional sequences identified as center sequences are false positives. Therefore, we can calculate the false positive rate of a given dataset by dividing the number of partitions created - 1 by the number of sequences in the dataset - 1: $FPR = \frac{\text{num_partitions} - 1}{\text{Number of sequences}}.$ 
+##### Example:
+```{r}
+example_denoise = denoise_isomiR_counts(sim_rowdata, sim_counts, transition_probs, miRNA = sim_rowdata$miRNA_name[1], 0.05, 10, "BH")
+
+example_partition_df = example_denoise$partition_df
+
+cat("Number of partitions created:", max(example_partition_df$partition), "\n")
+cat("Number of false positives:", max(example_partition_df$partition)-1, "\n")
+
+```
+
+We repeatedly applied the denoising algorithm to all 100 of the datasets we generated for this miRNA and have the false positive rate, true negative rate, etc. saved as well as the resulting partition objects. 
+```{r}
+sample_results_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE")
+sample_results = paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE/", sample_results_files[1]) %>% readRDS()
+cat("Objects saved in results object:", names(sample_results), "\n")
+tibble(sample_results)
+```
+
+```{r, echo = FALSE}
+mirna = strsplit(sample_results_files[1], "_NO")[[1]][1]
+num_fp = sample_results$num_false_positives
+fp_rate = num_fp/(num_fp + sample_results$num_true_negatives)
+false_positive_df=data.frame(x=1:100, y=fp_rate)
+ggplot(false_positive_df, aes(x=x, y=y)) + geom_point() + xlab("Dataset index") + ylab("Number of false positives") + ggtitle(paste0("False positive rate in each dataset for miRNA ", mirna)) + scale_x_continuous(limits=c(0,100)) + scale_y_continuous(limits=c(-0.05, 0.05)) + geom_abline(slope = 0, intercept = 0.05, col = "red") 
+```
+
