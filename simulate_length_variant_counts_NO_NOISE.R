@@ -104,7 +104,7 @@ simulate_length_variant_counts = function(miRNA, count_df, seed, transition_prob
 }
 
 for(n in 1:num_datasets){
-  datasets[[n]] = simulate_length_variant_counts(miRNA, count_df, n, transition_probs=transition_probs, add_noise=TRUE)
+  datasets[[n]] = simulate_length_variant_counts(miRNA, count_df, n, transition_probs=transition_probs, add_noise=FALSE)
 }
 
 save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_NO_NOISE/"

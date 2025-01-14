@@ -5,7 +5,7 @@ source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_funct
 
 transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
 
-length_variant_data_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_NO_NOISE/"
+length_variant_data_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants/"
 length_variant_data_files = list.files(length_variant_data_path)
 
 args = commandArgs(trailingOnly = TRUE)
@@ -34,10 +34,10 @@ num_false_negatives = num_seqs-num_false_positives-num_true_negatives-num_true_p
 
 miRNA = strsplit(length_variant_data_files[data_file_idx], "_100")[[1]][1]
 
-save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/"
+save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_08_2025/"
 
-save_file_name_partition = paste0(save_file_path, "partition_objs_NO_NOISE/", miRNA, "_NO_NOISE_simulated_length_variant_partitions.Rds", collapse="")
-save_file_name_results = paste0(save_file_path, "results_NO_NOISE/", miRNA, "_NO_NOISE_simulated_length_variant_results.Rds", collapse="")
+save_file_name_partition = paste0(save_file_path, "partition_objs/", miRNA, "_simulated_length_variant_partitions.Rds", collapse="")
+save_file_name_results = paste0(save_file_path, "results/", miRNA, "_simulated_length_variant_results.Rds", collapse="")
 
 results = list(num_partitions_created=num_partitions_created, num_seqs=num_seqs, num_false_positives=num_false_positives, 
                num_true_negatives=num_true_negatives, num_true_positives=num_true_positives, num_false_negatives=num_false_negatives)

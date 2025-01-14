@@ -160,3 +160,45 @@ false_positive_df=data.frame(x=1:100, y=fp_rate)
 ggplot(false_positive_df, aes(x=x, y=y)) + geom_point() + xlab("Dataset index") + ylab("Number of false positives") + ggtitle(paste0("False positive rate in each dataset for miRNA ", mirna)) + scale_x_continuous(limits=c(0,100)) + scale_y_continuous(limits=c(-0.05, 0.05)) + geom_abline(slope = 0, intercept = 0.05, col = "red") 
 ```
 
+```{r}
+#load all the results objects: 
+results_all = lapply(sample_results_files, function(x) return(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE/", x) %>% readRDS()))
+
+num_false_positives_all = lapply(results_all, function(x) return(x[["num_false_positives"]]))
+num_false_positives_all = num_false_positives_all %>% unlist() 
+num_true_negatives_all = lapply(results_all, function(x) return(x[["num_true_negatives"]]))
+num_true_negatives_all = num_true_negatives_all %>% unlist()
+fp_rate_all = num_false_positives_all/(num_false_positives_all + num_true_negatives_all)
+fp_rate_all_df = data.frame(fp_rate_all)
+colnames(fp_rate_all_df) = "fp_rate"
+mirna_names = strsplit(sample_results_files, "_NO")
+mirna_names = lapply(mirna_names, function(x) return(x[[1]])) %>% unlist()
+names(num_false_positives_all) = mirna_names
+names(num_true_negatives_all) = mirna_names
+x = vector()
+for(i in 1:length(mirna_names)){
+  x = c(x, rep(mirna_names[i], 100))
+}
+fp_rate_all_df$miRNA = x
+x = vector()
+for(i in 1:length(mirna_names)){
+  x = c(x, 1:100)
+}
+fp_rate_all_df$x = x
+```
+
+```{r}
+ggplot(fp_rate_all_df, aes(x=x, y=fp_rate, color = miRNA)) + geom_point() + geom_abline(slope=0, intercept=0.05, col='black') + xlab("Dataset index") + ylab("False positive rate") + ggtitle("False positive rate in simulated length variant datasets for all miRNAs") + theme(legend.position="None")
+```
+
+Calculate average false positive rate for each miRNA:
+```{r}
+avg_false_positive_rates = vector()
+for(i in 1:length(mirna_names)){
+  y = num_false_positives_all[[mirna_names[i]]]/(num_false_positives_all[[mirna_names[i]]] + num_true_negatives_all[[mirna_names[i]]])
+  avg_false_positive_rates = c(avg_false_positive_rates, y)
+}
+
+avg_fp_rates = data.frame(x=1:length(mirna_names), y=avg_false_positive_rates)
+ggplot(avg_fp_rates, aes(x=x, y=y)) + geom_point() + scale_y_continuous(limits=c(0,0.05)) + geom_abline(slope=0, intercept=0.05, col='red') + xlab("miRNA index") + ylab("Average false positive rate over 100 datasets") + ggtitle("Average false positive rates for all miRNAs")
+```
