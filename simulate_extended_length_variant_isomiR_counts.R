@@ -24,7 +24,7 @@ for(i in 1:num_datasets){
   datasets[[i]] = simulate_length_variant_isomiRs_extened(rowdata, count_df, miRNA, i, 1000, 100, transition_probs)
 }
 
-save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/extended_length_variants_NO_NOISE/"
+save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/extended_length_variants_NO_NOISE/01_14_2025/"
 save_file_name = paste0(miRNA, "_", num_datasets, "_simulated_length_variant_isomiRs_datasets.Rds")
 cat("Saving datasets to", paste0(save_file_path, save_file_name, collapse=""), "\n")
 

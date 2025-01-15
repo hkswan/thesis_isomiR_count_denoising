@@ -2,7 +2,9 @@
 title: "Denoise simulated length variants with noise results"
 author: "Hannah Swan"
 date: "2025-01-09"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -146,10 +148,16 @@ cat("Number of false positives:", max(example_partition_df$partition)-1, "\n")
 
 We repeatedly applied the denoising algorithm to all 100 of the datasets we generated for this miRNA and have the false positive rate, true negative rate, etc. saved as well as the resulting partition objects. 
 ```{r}
-sample_results_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE")
-sample_results = paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE/", sample_results_files[1]) %>% readRDS()
+sample_results_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/results")
+sample_results = paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/results/", sample_results_files[1]) %>% readRDS()
 cat("Objects saved in results object:", names(sample_results), "\n")
 tibble(sample_results)
+cat("\n tibble of sample results object:\n")
+sample_results_w_noise_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/results")
+sample_results_w_noise = paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results/", "Mmu-Mir-21_5p_simulated_length_variant_results.Rds") %>% readRDS()
+cat("\n tibble of sample_results_w_noise object:\n")
+tibble(sample_results_w_noise)
+
 ```
 
 ```{r, echo = FALSE}
@@ -158,47 +166,125 @@ num_fp = sample_results$num_false_positives
 fp_rate = num_fp/(num_fp + sample_results$num_true_negatives)
 false_positive_df=data.frame(x=1:100, y=fp_rate)
 ggplot(false_positive_df, aes(x=x, y=y)) + geom_point() + xlab("Dataset index") + ylab("Number of false positives") + ggtitle(paste0("False positive rate in each dataset for miRNA ", mirna)) + scale_x_continuous(limits=c(0,100)) + scale_y_continuous(limits=c(-0.05, 0.05)) + geom_abline(slope = 0, intercept = 0.05, col = "red") 
+
+#mirna_w_noise = strsplit(sample_results_w_noise_files, "_simulated")[[1]][1]
+num_fp_noise = sample_results_w_noise$num_false_positives
+fp_rate_noise = num_fp_noise/(num_fp_noise + sample_results_w_noise$num_true_negatives)
+false_positive_noise_df = data.frame(x=1:100, y=fp_rate_noise)
+ggplot(false_positive_noise_df, aes(x=x,y=y)) + geom_point() + xlab("Dataset index") + ylab("Number of false positives") + ggtitle(paste0("False positive rate in each dataset for miRNA ", mirna, "w/ noise")) + scale_x_continuous(limits=c(0,100)) + scale_y_continuous(limits=c(-0.05, 0.05)) + geom_abline(slope=0, intercept=0.05, col="hotpink1")
 ```
 
 ```{r}
 #load all the results objects: 
-results_all = lapply(sample_results_files, function(x) return(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results_NO_NOISE/", x) %>% readRDS()))
-
-num_false_positives_all = lapply(results_all, function(x) return(x[["num_false_positives"]]))
-num_false_positives_all = num_false_positives_all %>% unlist() 
-num_true_negatives_all = lapply(results_all, function(x) return(x[["num_true_negatives"]]))
-num_true_negatives_all = num_true_negatives_all %>% unlist()
-fp_rate_all = num_false_positives_all/(num_false_positives_all + num_true_negatives_all)
-fp_rate_all_df = data.frame(fp_rate_all)
-colnames(fp_rate_all_df) = "fp_rate"
-mirna_names = strsplit(sample_results_files, "_NO")
-mirna_names = lapply(mirna_names, function(x) return(x[[1]])) %>% unlist()
-names(num_false_positives_all) = mirna_names
-names(num_true_negatives_all) = mirna_names
-x = vector()
-for(i in 1:length(mirna_names)){
-  x = c(x, rep(mirna_names[i], 100))
-}
-fp_rate_all_df$miRNA = x
-x = vector()
-for(i in 1:length(mirna_names)){
-  x = c(x, 1:100)
-}
-fp_rate_all_df$x = x
+# results_all = lapply(sample_results_files, function(x) return(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_09_2025/results/", x) %>% readRDS()))
+# results_all_w_noise 
+# 
+# num_false_positives_all = lapply(results_all, function(x) return(x[["num_false_positives"]]))
+# num_false_positives_all = num_false_positives_all %>% unlist() 
+# num_true_negatives_all = lapply(results_all, function(x) return(x[["num_true_negatives"]]))
+# num_true_negatives_all = num_true_negatives_all %>% unlist()
+# fp_rate_all = num_false_positives_all/(num_false_positives_all + num_true_negatives_all)
+# fp_rate_all_df = data.frame(fp_rate_all)
+# colnames(fp_rate_all_df) = "fp_rate"
+# mirna_names = strsplit(sample_results_files, "_simulated")
+# mirna_names = lapply(mirna_names, function(x) return(x[[1]])) %>% unlist()
+# names(num_false_positives_all) = mirna_names
+# names(num_true_negatives_all) = mirna_names
+# x = vector()
+# for(i in 1:length(mirna_names)){
+#   x = c(x, rep(mirna_names[i], 100))
+# }
+# fp_rate_all_df$miRNA = x
+# x = vector()
+# for(i in 1:length(mirna_names)){
+#   x = c(x, 1:100)
+# }
+# fp_rate_all_df$x = x
 ```
 
 ```{r}
-ggplot(fp_rate_all_df, aes(x=x, y=fp_rate, color = miRNA)) + geom_point() + geom_abline(slope=0, intercept=0.05, col='black') + xlab("Dataset index") + ylab("False positive rate") + ggtitle("False positive rate in simulated length variant datasets for all miRNAs") + theme(legend.position="None")
+# ggplot(fp_rate_all_df, aes(x=x, y=fp_rate, color = miRNA)) + geom_point() + geom_abline(slope=0, intercept=0.05, col='black') + xlab("Dataset index") + ylab("False positive rate") + ggtitle("False positive rate in simulated length variant datasets for all miRNAs") + theme(legend.position="None")
 ```
 
 Calculate average false positive rate for each miRNA:
 ```{r}
-avg_false_positive_rates = vector()
-for(i in 1:length(mirna_names)){
-  y = num_false_positives_all[[mirna_names[i]]]/(num_false_positives_all[[mirna_names[i]]] + num_true_negatives_all[[mirna_names[i]]])
-  avg_false_positive_rates = c(avg_false_positive_rates, y)
-}
+# avg_false_positive_rates = vector()
+# for(i in 1:length(mirna_names)){
+#   y = num_false_positives_all[[mirna_names[i]]]/(num_false_positives_all[[mirna_names[i]]] + num_true_negatives_all[[mirna_names[i]]])
+#   avg_false_positive_rates = c(avg_false_positive_rates, y)
+# }
+# 
+# avg_fp_rates = data.frame(x=1:length(mirna_names), y=avg_false_positive_rates)
+# ggplot(avg_fp_rates, aes(x=x, y=y)) + geom_point() + scale_y_continuous(limits=c(0,0.05)) + geom_abline(slope=0, intercept=0.05, col='red') + xlab("miRNA index") + ylab("Average false positive rate over 100 datasets") + ggtitle("Average false positive rates for all miRNAs")
+```
 
-avg_fp_rates = data.frame(x=1:length(mirna_names), y=avg_false_positive_rates)
-ggplot(avg_fp_rates, aes(x=x, y=y)) + geom_point() + scale_y_continuous(limits=c(0,0.05)) + geom_abline(slope=0, intercept=0.05, col='red') + xlab("miRNA index") + ylab("Average false positive rate over 100 datasets") + ggtitle("Average false positive rates for all miRNAs")
+### Getting results from correctly simulated no noise data containing only length variants that are shorter than the center sequencce 
+```{r, echo = FALSE}
+results_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/results"
+results_files = list.files(results_file_path)
+results = lapply(results_files, function(x) return(paste0(results_file_path, "/", x) %>% readRDS()))
+
+
+mirnas = sapply(results_files, function(x) strsplit(x, "_simulated")[[1]][1])
+#first extract the number of partitions created for each miRNA:
+num_partitions_by_mirna = lapply(results, function(x) return(x[['num_partitions_created']])) %>% unlist()
+miRNA_name_col = vector()
+for(i in 1:length(mirnas)){
+  miRNA_name_col = c(miRNA_name_col, rep(mirnas[i], 100))
+}
+num_partitions_df = data.frame('num_partitions' = num_partitions_by_mirna, 'miRNA_name' = miRNA_name_col)
+num_partitions_df$miRNA_name = as.factor(num_partitions_df$miRNA_name)
+num_partitions_df$dataset_idx = rep(1:100, length(mirnas))
+ggplot(num_partitions_df, aes(x=dataset_idx, y=num_partitions, color = miRNA_name)) + geom_point() + xlab("Dataset index") + ylab("Number of partitions created in denoising dataset counts") + ggtitle("Number of partitions vs. dataset index in simulated data")+theme(legend.position = "None")
+cat("Average number of partitions created:", mean(num_partitions_df$num_partitions), "\n")
+```
+
+```{r, echo = FALSE}
+num_false_positives_by_mirna = lapply(results, function(x) return(x[["num_false_positives"]])) %>% unlist()
+num_false_positives_df = data.frame('num_fp' = num_false_positives_by_mirna)
+num_false_positives_df$miRNA_name = num_partitions_df$miRNA_name
+num_false_positives_df$dataset_idx = num_partitions_df$dataset_idx
+
+
+ggplot(num_false_positives_df, aes(x=dataset_idx, y=num_fp, color = miRNA_name)) + geom_point() + theme(legend.position="None") + xlab("Dataset idx") + ylab("Number of false positives") + ggtitle("Number of false positives vs. dataset idx across all miRNAs")
+cat("Average number of false positives across all miRNAs and all simulated datasets:", mean(num_false_positives_by_mirna), "\n")
+cat("Maxmimum number of false positives across all miRNAs and all simulated datasets:", max(num_false_positives_by_mirna), "\n")
+```
+
+Key takeaways: Our algorithm definitely seems to be acting as we would expect. We're well below the nominal false positive rate of $\alpha=0.05$. We are generating draws probablistically so its reasonable that on occasion we draw a simulated count from a low density part of the distribution that gets picked as a true sequence even though its not. 
+\n 
+
+Next, I'm going to look at the sequences that we've simulated along with their read counts to see which ones are getting picked out as true sequences. I suspect that they are sequences with a "larger" degree of difference from the center sequence, i.e. more deletions. The "farther" a sequence is from the center sequence i.e. the more changes that need to happen to the center sequence to generate the observed isomiR sequence, the less likely it is to generate this sequence from just technical effects in the sequencing process. Therefore, if we observe just 1 read count of this sequence, we are likely to give it its own partition. I don't think this is necessarily good or bad right now, I think there's merits both to allowing this sequence to form its own partition and to keeping it from forming its own partition. 
+
+```{r}
+#get miRNAs with simulated datasets that have false positives:
+mirnas_w_fp = filter(num_false_positives_df, num_fp > 0) %>% select(., miRNA_name) %>% unname() %>% unlist() %>% as.character() %>% unique()
+#get the datasets for one of the miRNAs we want:
+miRNA = mirnas_w_fp[4]
+cat("miRNA:",miRNA, "\n")
+partition_obj_path = '/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/partition_objs/'
+partition_obj_files = list.files(partition_obj_path)
+filename = partition_obj_files[grepl(miRNA, partition_obj_files)]
+partition_objs = paste0(partition_obj_path, filename, collapse="") %>% readRDS()
+
+dataset_idx =
+  filter(num_false_positives_df, num_fp > 0 & miRNA_name==miRNA) %>% select(., dataset_idx) %>% unlist() %>% unname()
+print(dataset_idx)
+p = partition_objs[[dataset_idx[1]]]
+p$partition_df %>% filter(., center == 1) 
+
+fp_seq = p$partition_df %>% filter(., center == 1 & partition != 1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+cat("False positive seq:", fp_seq, "\n")
+p$alignments[[fp_seq]]
+#alignment looks correct 
+
+lambda_fp_seq = p$master_lambdas$`1`[[fp_seq]]
+
+mu = lambda_fp_seq * p$partition_df$count[p$partition_df$partition==1 & p$partition_df$center==1]
+num = ppois(5-1, mu, lower.tail=F)
+print(num)
+denom = 1-dpois(0, mu)
+print(denom)
+cat("Raw p-value:", num/denom, "\n")
+#looks like we did this correctly and it just happened that we drew a large count by chance 
 ```
