@@ -1,5 +1,5 @@
 ---
-title: "Denoise simulated length variants with noise results"
+title: "Denoise simulated length variants with no noise results"
 author: "Hannah Swan"
 date: "2025-01-09"
 output:
@@ -14,8 +14,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 First, begin by loading necessary functions that we've written plus packages that we might need to analyze results 
 ```{r, echo=FALSE}
-source("/scratch/hswan/thesis_isomiR_count_denoising/denoise_isomiR_counts_WORKING_FUNCTION.R")
-source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_function.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/Code/denoise_isomiR_counts_WORKING_FUNCTION.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/Code/load_mouse_miRNA_data_function.R")
 library(tidyverse)
 library(DESeq2)
 transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
@@ -278,3 +278,13 @@ cat("Raw p-value:", num/denom, "\n")
 #looks like we did this correctly and it just happened that we drew a large count by chance 
 ```
 
+#### Extending our algorithm to simulate length variant isomiR sequence counts that are either shorter *or* longer than the center sequence 
+So far, we've dealt only with length variant isomiR sequences that are shorter at either the 5p end or the 3p end than the center sequence, but additions can happen too. We can extend the code that we have for generating the sequences to also add on to either the 5p end or the 3p end at random. The process proceeds pretty much the same as we outlined above, except this time the space of differences we are sampling from to generate the different sequences changes. Recall that before, we drew from a uniform distribution with support ranging from $1 to 7$. Now, we will allow the difference in length to range from $-7 to 7$. 
+
+```{r}
+set.seed(1989)
+num_differences = sample(-7:7, 1)
+cat("Number of differences between the center sequence and the length variant isomiR sequence we are going to generate:", num_differences, "\n")
+```
+
+Next, we evaluate if the difference in length between the center sequence and the isomiR sequence is greater than 0 or less than 0. If it's greater than 0, we take that to mean the length variant isomiR sequence is shorter than the center sequence and we remove nucleotides. If the difference in length between the center sequence and the isomiR sequence is less than 0, we take that to mean the length variant isomiR sequence is *longer* than the center sequence and we *add* nucleotides to either the 5p end or the 3p end. 

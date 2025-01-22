@@ -4,8 +4,8 @@ library(Biostrings)
 library(tidyverse)
 library(DESeq2)
 
-source("/scratch/hswan/thesis_isomiR_count_denoising/load_mouse_miRNA_data_function.R")
-source("/scratch/hswan/thesis_isomiR_count_denoising/correct_technical_length_variant_functions.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/Code/load_mouse_miRNA_data_function.R")
+source("/scratch/hswan/thesis_isomiR_count_denoising/Code/correct_technical_length_variant_functions.R")
 
 
 denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matrix,
