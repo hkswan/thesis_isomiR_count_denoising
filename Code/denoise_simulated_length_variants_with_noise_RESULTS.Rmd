@@ -14,10 +14,10 @@ knitr::opts_chunk$set(echo = TRUE)
 
 First, begin by loading necessary functions that we've written plus packages that we might need to analyze results 
 ```{r, echo=FALSE}
-source("/scratch/hswan/thesis_isomiR_count_denoising/Code/denoise_isomiR_counts_WORKING_FUNCTION.R")
-source("/scratch/hswan/thesis_isomiR_count_denoising/Code/load_mouse_miRNA_data_function.R")
-library(tidyverse)
-library(DESeq2)
+suppressMessages(source("/scratch/hswan/thesis_isomiR_count_denoising/Code/denoise_isomiR_counts_WORKING_FUNCTION.R"))
+suppressMessages(source("/scratch/hswan/thesis_isomiR_count_denoising/Code/load_mouse_miRNA_data_function.R"))
+suppressMessages(library(tidyverse))
+suppressMessages(library(DESeq2))
 transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
 ```
 
@@ -177,7 +177,7 @@ ggsave(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_N
 ```{r}
 #function that takes the results file name and plots the false positive rate of each dataset vs the dataset index so we can see which simulated datasets, if any, have a false positive rate of creating isomiR partitions that is as extreme or more extreme than the nominal false positive rate (0.05)
 #function saves the plot that we create to plots folder, will also print the plot we create if print_plt argument is set to TRUE. Default is FALSE so that we don't print out like 700 plots. 
-plt_fp_rate = function(result_file_name, print_plt = FALSE){
+plt_fp_rate = function(result_file_name, print_plt = FALSE, data_type = "NO_NOISE"){
   mirna = strsplit(result_file_name, "_simulated")[[1]][1]
   file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/results/"
   results = readRDS(paste0(file_path, result_file_name, collapse=""))
@@ -185,8 +185,9 @@ plt_fp_rate = function(result_file_name, print_plt = FALSE){
   fp_rate = num_fp/(num_fp + results$num_true_negatives)
   false_positive_df = data.frame(x=1:length(fp_rate), y=fp_rate)
   p = suppressWarnings(ggplot(false_positive_df, aes(x=x, y=y, color='obs')) + geom_point() + xlab("Dataset index") + ylab("False positive rate") + ggtitle(paste0("False positive rate in each dataset for miRNA ", mirna)) + scale_x_continuous(limits=c(0,100)) + scale_y_continuous(limits=c(-0.05, 0.05)) + geom_smooth(aes(x, x*0+0.05, color="nominal")) + scale_color_manual(breaks=c("obs", "nominal"), values=c("obs"="black", "nominal"="red")))
-  cat("Saving plot to", paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/plots/", mirna, "_fp_plot.png", collapse=""), "\n")
-  ggsave(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/NO_NOISE/plots/", mirna, "fp_plot.png", collapse=""), p)
+  save_plt_path = paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/", data_type, "/plots/", collapse="")
+  cat("Saving plot to", paste0(save_plt_path, mirna, "_fp_plot.png", collapse=""), "\n")
+  ggsave(paste0(save_plt_path, mirna, "_fp_plot.png", collapse=""), p)
   if(print_plt){
     print(p)
   }
@@ -287,4 +288,256 @@ num_differences = sample(-7:7, 1)
 cat("Number of differences between the center sequence and the length variant isomiR sequence we are going to generate:", num_differences, "\n")
 ```
 
-Next, we evaluate if the difference in length between the center sequence and the isomiR sequence is greater than 0 or less than 0. If it's greater than 0, we take that to mean the length variant isomiR sequence is shorter than the center sequence and we remove nucleotides. If the difference in length between the center sequence and the isomiR sequence is less than 0, we take that to mean the length variant isomiR sequence is *longer* than the center sequence and we *add* nucleotides to either the 5p end or the 3p end. 
+Next, we evaluate if the difference in length between the center sequence and the isomiR sequence is greater than 0 or less than 0. If it's greater than 0, we take that to mean the length variant isomiR sequence is shorter than the center sequence and we remove nucleotides. If the difference in length between the center sequence and the isomiR sequence is less than 0, we take that to mean the length variant isomiR sequence is *longer* than the center sequence and we *add* nucleotides to either the 5p end or the 3p end. Notice that we don't do anything if we sample 0 as the difference in length. This is on purpose - we don't want duplicate sequences in our dataset and 0 differences just gives us the center sequence back. 
+```{r}
+ends = c("3p", "5p")
+nts = c("A", "C", "G", "T")
+
+#artificially setting the number of differences to be negative so we can demonstrate how it works:
+num_differences = -2
+cat("Number of differences:", num_differences, "\n")
+#if less than 0, we're adding to the sequence:
+if(num_differences < 0){
+  seq = center_seq 
+  for(i in 1:-num_differences){
+    #first, sample the end of the sequence (either 3p or 5p)
+    e = sample(ends, 1)
+    #then sample your nucleotide:
+    nt = sample(nts, 1)
+    #if your end is 3p, add it to the end of the sequence
+    cat("Adding", nt, "to the", e, "end \n")
+    if(e == "3p"){
+      seq = paste0(seq, nt, collapse="")
+    } else{
+      #otherwise we tack it onto the front to add it onto the 5p end 
+      seq = paste0(nt, seq, collapse="")
+    }
+  }
+} else if(num_differences >0){
+  #if the difference in length is greater than 0, we proceed exactly as we did before
+  seq = center_seq
+  for(i in 1:num_differences){
+    e = sample(ends, 1)
+    if(e == "3p"){
+      cat("Removing a nucleotide from the 3p end \n")
+      seq = substr(seq, start=1, stop = nchar(seq)-1)
+  } else if(e == "5p"){
+    cat("Removing a nucleotide from the 5p end \n")
+    seq = substr(seq, start = 2, stop = nchar(seq))
+    }
+  }
+}
+
+cat("length variant isomiR sequence we generated:", seq, "\n")
+Biostrings::pairwiseAlignment(pattern=center_seq, seq)
+```
+
+Once we've generated our sequence we go through the same steps that we did as before: first, we align the sequence to the center sequence. Then, we get the transitions from the alignment and use those individual transitions and the transition probability matrix to calculate $\lambda$,  the probability of generating a read of the length variant isomiR sequence from the center sequence. We multiply $\lambda$ by $n_j$, the observed read count of the center sequence. $\lambda n_j$ gives us the mean and variance parameters of the Poisson distribution we assume that the read counts of isomiR sequences follows under the error model. Since we have that distribution, we can then draw a read count from that distribution. Repeating this process to generate many different sequence/read count pairs gives us a null dataset that we can use to determine if things are running as they should. I anticipate that this will actually work a little better than just simulating length variant isomiRs that are shorter than the center sequence because we can generate more sequences. The larger number of sequences gets us closer to what a real miRNA profiling dataset would look like. 
+
+## Extended length variant results 
+```{r}
+results_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_14_2025/extended_length_variants_NO_NOISE/results/"
+results_files = list.files(results_file_path)
+
+#load first file: 
+results_1 = readRDS(paste0(results_file_path, results_files[1], sep=""))
+#get number of false positives:
+num_fp = results_1$num_false_positives
+table(num_fp)
+cat("Average number of false positives:", mean(num_fp), "\n")
+plt_fp_rate(results_files[1], print_plt=TRUE, data_type="extended_length_variants_NO_NOISE")
+```
+
+```{r}
+#load all the results files 
+results_all = lapply(results_files, function(x) paste0(results_file_path, x, collapse="") %>% readRDS())
+
+num_partitions_all = lapply(results_all, function(x) return(x[["num_partitions_created"]])) %>% unlist()
+table(num_partitions_all)
+cat("Average number of partitions:", mean(num_partitions_all), "\n")
+
+num_fp_all = lapply(results_all, function(x) return(x[["num_false_positives"]])) %>% unlist()
+table(num_fp_all)
+cat("Average number of false positives:", mean(num_fp_all), "\n")
+
+#plot all the false positives together:
+mirnas = sapply(results_files, function(x) strsplit(x, "_simulated")[[1]][1])
+df = data.frame(sapply(mirnas, function(x) rep(x, 100)) %>% matrix(., ncol=1))
+colnames(df) = "miRNA"
+df$num_fp = num_fp_all
+df$dataset_idx = rep(1:100, length(mirnas)) %>% matrix(., ncol=1) 
+ggplot(df, aes(x=dataset_idx, y=num_fp)) + geom_point() + geom_abline(slope = 0, intercept = 0.05*101, col = 'red') + scale_y_continuous(limits=c(0, 6)) + xlab("Dataset idx") + ylab("number of falsely identified true isomiRs") + ggtitle("Number of falsely identified isomiR sequences vs dataset index across all miRNAs")
+#commented the line below out because i already made plots of all the results i currently have 
+#lapply(results_files, plt_fp_rate, data_type = 'extended_length_variants_NO_NOISE')
+```
+
+
+#### work on identifying multiple center sequences and simulating sequences that way, then denoising, do we get all the true center sequences back? 
+```{r}
+count_df_mirna = count_df %>% filter(., miRNA_name == mirna) %>% arrange(., desc(count))
+
+#take the first 2 sequences:
+center_seqs = count_df_mirna[1:2, "uniqueSequence"]
+
+center1 = center_seqs[1]
+center2 = center_seqs[2]
+#sample the difference in length:
+set.seed(1989)
+
+
+isomiR_seqs1 = c()
+isomiR_seqs2 = c()
+i = 0
+while(i < 10000 & length(isomiR_seqs2) <= 100){
+  seq = center1
+  num_differences = sample(-7:7, 1)
+  cat("Difference in length:", num_differences, "\n")
+  if(num_differences < 0){
+    for(j in 1:-num_differences){
+      #first sample end:
+      e = sample(ends, 1)
+      #then sample nucleotide:
+      nt = sample(nts, 1)
+    if(e == "3p"){
+      seq = paste0(seq, nt, collapse="")
+    } else if(e == "5p"){
+      seq = paste0(nt, seq, collapse="")
+      }
+    }
+  } else if(num_differences > 0) {
+    #first sample end:
+    for(j in 1:num_differences){
+      e = sample(ends, 1)
+      if(e == "3p"){
+        seq = substr(seq, start = 1, stop = nchar(seq)-1)
+    } else if(e == "5p"){
+        seq = substr(seq, start = 2, stop = nchar(seq))
+      }
+    }
+  }
+  
+  if(!(seq %in% isomiR_seqs2) & (seq != center)){
+  isomiR_seqs2 = c(isomiR_seqs2, seq)
+  }
+  i = i+1
+}
+
+isomiR_seqs = list(isomiR_seqs1, isomiR_seqs2)
+iso = unlist(isomiR_seqs)[unlist(isomiR_seqs) %in% isomiR_seqs1 & unlist(isomiR_seqs) %in% isomiR_seqs2]
+
+unique_isomiR_seqs1 = isomiR_seqs1[!(isomiR_seqs1 %in% iso)]
+unique_isomiR_seqs2 = isomiR_seqs2[!(isomiR_seqs2 %in% iso)]
+isomiR_seqs=list(unique_isomiR_seqs1, unique_isomiR_seqs2)
+names(isomiR_seqs) = center_seqs
+
+alignments = list()
+for(seq in center_seqs){
+  isomirs = isomiR_seqs[[seq]]
+  a = lapply(isomirs, Biostrings::pairwiseAlignment, pattern = seq)
+  alignments[[seq]] = a 
+}
+
+transitions = list()
+for(seq in center_seqs){
+  t = lapply(alignments[[seq]], get_transitions)
+  transitions[[seq]] = t
+}
+
+lambdas = list()
+for(seq in center_seqs){
+  l = lapply(transitions[[seq]], compute_lambda, transition_probs = transition_probs)
+  lambdas[[seq]] = l
+}
+
+mus = list()
+for(seq in center_seqs){
+  nj = filter(count_df, uniqueSequence == seq) %>% select(., count) %>% unlist() %>% unname()
+  l = lambdas[[seq]] %>% unlist()
+  mu = l*nj 
+  mus[[seq]] = mu 
+}
+
+
+counts = vector()
+for(seq in center_seqs){
+  mu = mus[[seq]]
+  for(m in mu){
+    counts = c(counts, rpois(1, m))
+  }
+}
+
+
+
+counts = c(counts, filter(count_df, uniqueSequence %in% center_seqs) %>% select(., count) %>% unlist() %>% unname())
+sim_rowdata = data.frame(miRNA_name = rep(mirna, length(counts)), uniqueSequence = c(unlist(isomiR_seqs), center_seqs))
+
+```
+
+
+```{r}
+tst_denoising = denoise_isomiR_counts(sim_rowdata, counts, transition_probs, miRNA=mirna, 0.05, 10, "BH")
+
+#make count_df:
+sim_count_df = data.frame(sim_rowdata, count=counts)
+
+true_partition_df= data.frame(sim_count_df, 'partition' = rep(1, nrow(sim_count_df)))
+true_partition_df$partition[true_partition_df$uniqueSequence %in% isomiR_seqs2 | true_partition_df$uniqueSequence == center_seqs[2]] = 2
+
+true_counts = vector()
+for(j in unique(true_partition_df$partition)){
+  true_counts = c(true_counts, filter(true_partition_df, partition == j) %>% select(., count) %>% sum() %>% unlist())
+}
+names(true_counts) = center_seqs
+
+inferred_counts = vector()
+for(j in unique(tst_denoising$partition_df$partition)){
+  inferred_counts = c(inferred_counts, filter(tst_denoising$partition_df, partition == j) %>% select(., count) %>% sum() %>% unlist())
+}
+names(inferred_counts) = center_seqs
+
+##take  second dataset and run algorithm for only 1 iteration: 
+tst_debug =  denoise_isomiR_counts(sim_rowdatas[[2]],  sim_counts[[2]], transition_probs, true_miRNAs[1], 0.05, 10, "BH")
+tst_debug1 = denoise_isomiR_counts(sim_rowdatas[[1]], sim_counts[[1]], transition_probs, true_miRNAs[1], 0.05, 10, "BH")
+tst_debug2 =  denoise_isomiR_counts(sim_rowdatas[[3]], sim_counts[[3]], transition_probs, true_miRNAs[1], 0.05, 10, "BH")
+tst_debug3 = denoise_isomiR_counts(sim_rowdatas[[4]], sim_counts[[4]], transition_probs, true_miRNAs[1], 0.05, 10, "BH")
+tst_debug4 = denoise_isomiR_counts(sim_rowdatas[[5]], sim_counts[[5]], transition_probs, true_miRNAs[1], 0.05, 10, "BH")
+
+
+dataset_idxs = c(2, 1, 3, 4, 5)
+tst_debug_objs = list(tst_debug, tst_debug1, tst_debug2, tst_debug3, tst_debug4)
+
+#take a test debug object, pull out the number of partitions  made:
+num_partitions_created = vector()
+true_num_partitions = vector()
+
+for(i in 1:length(dataset_idxs)){
+  num_partitions_created = c(num_partitions_created, tst_debug_objs[[i]]$partition_df$partition %>% max())
+  true_num_partitions = c(true_num_partitions, length(tst_datasets[[dataset_idxs[i]]]$center_seqs))
+  
+}
+
+#to calculate the number of true positives:
+#1. get a tst_debug partition_df object
+#2. from that object, pull out the center sequences. each center sequence that also appears in the tsts_datasets center seqs vector is a true positive:
+
+get_true_and_false_positives = function(partition_obj, true_center_seqs){
+  inferred_center_seqs = filter(partition_obj, center== 1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  num_tps = sum(inferred_center_seqs %in% true_center_seqs)
+  num_fps = length(inferred_center_seqs) - num_tps
+  return(list(num_tps=num_tps, num_fps=num_fps))
+}
+
+get_true_and_false_negatives = function(partition_obj, true_center_seqs){
+  inferred_isomiR_seqs = filter(partition_obj, center==0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  num_tns = sum(!(inferred_isomiR_seqs %in% true_center_seqs))
+  num_fns = length(inferred_isomiR_seqs) - num_tns
+  return(list(num_tns=num_tns, num_fns=num_fns))
+}
+
+get_true_and_false_positives(tst_debug_objs[[2]]$partition_df, tst_datasets[[dataset_idxs[2]]]$center_seqs)
+get_true_and_false_negatives(tst_debug_objs[[2]]$partition_df, tst_datasets[[dataset_idxs[2]]]$center_seqs)
+
+1/244
+
+
+```

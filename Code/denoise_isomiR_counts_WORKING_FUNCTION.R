@@ -96,8 +96,10 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
           new_partition = max(update_df$partition) + 1 
           cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
           if(length(new_center_seq) > 1){
-            cat("Multiple candidates for new center sequence. Picking one at random.\n")
-            new_center_seq = sample(new_center_seq, 1)
+            cat("Multiple candidates for new center sequence. Picking most abundant sequence.\n")
+            new_center_seq= filter(partition_df, uniqueSequence %in% new_center_seq) %>% 
+              filter(., count == max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+            #new_center_seq = sample(new_center_seq, 1)
           }
           update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
           update_df$center[update_df$uniqueSequence == new_center_seq] = 1
