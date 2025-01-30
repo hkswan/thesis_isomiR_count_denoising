@@ -1,0 +1,461 @@
+---
+title: "Multi partitions results"
+author: "Hannah Swan"
+date: "2025-01-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+suppressMessages(library(tidyverse))
+suppressMessages(source("/scratch/hswan/thesis_isomiR_count_denoising/Code/denoise_isomiR_counts_WORKING_FUNCTION.R"))
+transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
+```
+
+
+```{r}
+results_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/results/"
+results_files = list.files(results_file_path)
+
+
+#getting results that we have for now until the other stuff finishes running 
+results_list = list()
+for(i in results_files){
+  filename = paste0(results_file_path, i, collapse="") 
+  results_list[[i]] = readRDS(filename)
+}
+
+miRNAs_successful = strsplit(results_files, "_results")
+miRNAs_successful = lapply(miRNAs_successful, function(x) return(x[[1]])) %>% unlist()
+
+
+tst = results_list[[1]]
+tst_fp_rates = lapply(tst, function(x) return(x[["fp_rate"]])) %>% unlist() %>% unname()
+
+#make fp rate vectors:
+fp_rate_df = vector()
+#data_idx_vec = vector()
+
+for(i in 1:length(results_list)){
+  x = results_list[[i]]
+  fp_rates = lapply(x, function(y) return(y[['fp_rate']])) %>% unlist() %>% unname()
+  fp_rate_df = c(fp_rate_df, mean(fp_rates))
+  #data_idx_vec = c(data_idx_vec, 1:50)
+}
+
+df = data.frame(x = 1:length(miRNAs_successful), y = fp_rate_df)
+
+ggplot(df, aes(x=x,y=y)) + geom_point() + geom_abline(slope=0, intercept=0.05, color='red') + scale_y_continuous(limits = c(0, 0.07))+ ylab("Average false positive rate across 50 datasets") + xlab("miRNA idx")
+```
+
+Key takeaways from this plot: On average across 50 datasets, for each miRNA, the false positive rate is below the nominal rate. 
+\n
+
+Look at how well we do at identifying the true positives in our model -- what's the power to detect true isomiRs?
+```{r}
+tp_rates_vec = vector()
+for(i in 1:length(results_list)){
+  x = lapply(results_list[[i]], function(y) return(y[['tp_rate']])) %>% unlist()
+  tp_rates_vec = c(tp_rates_vec, mean(x))
+}
+
+poor_performance_miRNAs = miRNAs_successful[tp_rates_vec < 0.8]
+cat("First miRNA with poor performance:", poor_performance_miRNAs[1], "\n")
+
+#get the partition objects for this miRNA: 
+partition_obj_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/partition_objs")
+filename = partition_obj_files[grepl(poor_performance_miRNAs[1], partition_obj_files)]
+partition_objs = readRDS(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/partition_objs/", filename, collapse=""))
+
+x = partition_objs[[1]]$partition_df
+
+dim(x)
+head(x)
+table(x$count)
+filter(x, center == 1)
+filter(x, count != 0)
+
+#seems to me that the issue here isn't *necessarily* an issue. This is just a lowly expressed miRNA where even the "most highly" expressed miRNA sequences are very lowly expressed. Combined with the fact that the 3 center sequences are very closely related to one another, under our model, we fail to create that third partition. 
+
+#investigate further by looking at the mouse data set and, for each of the miRNAs with poor performance, look at the observed read count of the 3 most highly expressed sequences 
+mousedata = load_mouse_miRNA_data()
+rowdata = mousedata$rowdata
+countdata = mousedata$countdata
+count_df = rowSums(countdata)
+count_df = cbind(rowdata, count=count_df) %>% data.frame()
+
+
+top_3_counts = list()
+for(i in 1:length(poor_performance_miRNAs)){
+  mirna = poor_performance_miRNAs[i]
+  cat("miRNA:", mirna, "\n")
+  d = filter(count_df, miRNA_name == mirna) %>% arrange(., desc(count)) %>% select(., count) %>% unlist() %>% unname()
+  d = d[1:3]
+  top_3_counts[[mirna]] = d
+}
+
+top_count = lapply(top_3_counts, function(x) return(x[1])) %>% unlist()
+count_2 = lapply(top_3_counts, function(x) return(x[2])) %>% unlist()
+count_3 = lapply(top_3_counts, function(x) return(x[3])) %>% unlist()
+
+df = data.frame(x=rep(1:length(top_count),3), y=c(top_count,count_2, count_3), rank=c(rep(1, length(top_count)), rep(2, length(top_count)), rep(3, length(top_count))))
+df$rank = as.factor(df$rank)
+ggplot(df, aes(x=x, y=log(y), color = rank)) + geom_point() + xlab("miRNA idx") + ylab("Log(observed read count)") + geom_abline(intercept = log(10), slope = 0, col='orange3')
+```
+\n
+\n
+
+
+
+*Takeaways from this plot*: Along the x-axis is an integer that, if used to index the `poor_performance_miRNAs` vector we created, will return the name of a miRNA that had power to detect the true isomiR sequences we used to simulate the length variants and their counts below $1-\beta = 0.8$. The y-axis is the log of the observed read count. The points on the plot are colored based on their rank i.e. points that are red in color correspond to the log of the observed read count for the most highly expressed sequence for a given miRNA. What seems to be driving the poor performance for these miRNAs is a combination of the following things. First, when we examine the top 3 most highly expressed sequences for a given miRNA, they are often very closely related sequences. There might be 1-3 deletions at the 3p end of the sequence, a substitution, whatever. When the top 3 most highly expressed sequences are closely related this and also all have relatively low observed read counts, there isn't really enough information to reject the null hypothesis that these closely related sequences resulted from the sequencing of the most highly expressed sequence. So, although we're seeing poor power in this situation, it is directly in line with our assumptions we built the model on. We'll have to decide if we want to alter the model to achieve better performance in this situation. 
+\n
+Another situation is that the distribution of read counts of the top 3 most highly expressed isomiR sequences for a given miRNA is skewed to the right. The observed read count of the first most highly expressed sequence may be several orders of magnitude greater than that of the seceond and third most highly expressed sequences. Therefore, there is once again not enough information present to reject the null hypothesis and allow those sequences to form their own partitions. Again seems like poor power, but I think in a real application might be okay? We won't see this issue if we're more careful about how we simulate the isomiR sequences + their read counts. 
+
+#### Potential issues:
+One thing that I noticed is that it appears that the top 3 most abundant isomiR sequences in a given miRNA appear to be very closely related to each other. I suspect that this might have to do with the imprecise cleavage of the Drosha/Dicer enzymes and therefore is more of a technical variation in the biosynthesis process rather than a true biological isomiR. The variation happens outside the seed sequence at the 3p end, so based on my limited knowledge of miRNA function I don't think this affects the function of the miRNAs. Its likely that all 3 have the same target mRNA(s). When we simulate isomiRs from any one of these three sequences, its possible that we can end up creating a sequence that's more similar to one of the other center sequences we picked. Therefore, it won't have a significant p-value and won't move to a newly created partition. One way around this is to allow all sequences to move - but this really slows down the algorithm. Or, maybe this is just a shortcoming of the method and we just proceed knowing that this might happen. 
+
+```{r, echo=FALSE}
+data_files_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_multi_partition/01_24_2025"
+data_files = list.files(data_files_path)
+filename = data_files[grepl(miRNAs_successful[1], data_files)]
+
+data_list = readRDS(paste0(data_files_path, "/", filename, collapse=""))
+names(data_list[[1]])
+
+#first get collection of center sequences: 
+num_unique_center_sequences_by_miRNA = vector()
+for(i in 1:length(data_files)){
+  data_list = readRDS(paste0(data_files_path, "/", filename, collapse=""))
+  center_seqs = lapply(data_list, function(x) return(x[['center_seqs']])) %>% unlist()
+  num_unique_center_sequences_by_miRNA = c(num_unique_center_sequences_by_miRNA, length(unique(center_seqs)))
+}
+
+table(num_unique_center_sequences_by_miRNA)
+```
+
+This is kind of expected but for a given miRNA, each of the 50 simulated datasets we create for that miRNA has the same 3 center sequences. 
+
+
+For a given miRNA, pull out the isomiR sequences for each center sequence 
+```{r, echo = FALSE}
+miRNA = miRNAs_successful[1]
+cat("miRNA:", miRNA, "\n")
+filename = data_files[grepl(miRNA, data_files)]
+#load data_list: 
+data_list = readRDS(paste0(data_files_path, "/", filename, collapse=""))
+#pull out the first element:
+data_obj = data_list[[1]]
+#get center sequences:
+center_seqs = data_obj$center_seqs
+#get partition_obj associated with this data_obj: 
+partition_obj_files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/partition_objs")
+filename = partition_obj_files[grepl(miRNA, partition_obj_files)]
+partition_objs = readRDS(paste0("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/partition_objs/", filename, collapse=""))
+partitioning = partition_objs[[1]]$partition_df
+partitioning$true_partition = rep(0, nrow(partitioning))
+for(seq in center_seqs){
+  isomirs = data_obj$isomiR_seqs[[seq]]
+  p = filter(partitioning, uniqueSequence == seq) %>% select(., partition) %>% unlist() %>% unname()
+  partitioning$true_partition[partitioning$uniqueSequence %in% isomirs] = p
+  partitioning$true_partition[partitioning$uniqueSequence == seq] = p
+}
+
+sum(partitioning$true_partition == partitioning$partition)
+sum(partitioning$true_partition == 2 & partitioning$partition == 1 & partitioning$count !=0)
+sum(partitioning$true_partition == 3 & partitioning$partition == 1 & partitioning$count != 0)
+
+#pull out all the isomiR sequences:
+isomiR_seqs = filter(partitioning, center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#pull out center sequences
+center_seqs = filter(partitioning, center == 1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+
+master_alignments = list()
+master_transitions = list()
+master_lambdas = list()
+
+#first get alignments:
+start = Sys.time()
+for(j in center_seqs){
+  master_alignments[[j]] = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern = j)
+}
+elapsed = Sys.time() - start
+print(elapsed)
+
+for(j in center_seqs){
+  master_transitions[[j]] = lapply(master_alignments[[j]], get_transitions)
+}
+
+for(j in center_seqs){
+  master_lambdas[[j]] = lapply(master_transitions[[j]], compute_lambda, transition_probs = transition_probs)
+}
+
+partitioning$updated_partition = rep(0, nrow(partitioning))
+for(i in 1:length(isomiR_seqs)){
+  lambdas_for_seq = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
+  updated_p = which(lambdas_for_seq == max(lambdas_for_seq))
+  partitioning$updated_partition[partitioning$uniqueSequence == isomiR_seqs[i]] = updated_p
+  
+}
+
+for(i in 1:3){
+  s = filter(partitioning, center == 1 & partition == i) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  partitioning$updated_partition[partitioning$uniqueSequence == s] = i
+}
+
+#calculate inferred counts based on updated_partition: 
+unique_upd8_partitions = unique(partitioning$updated_partition) %>% sort()
+upd8_infer_counts = vector()
+for(i in unique_upd8_partitions){
+  x = filter(partitioning, updated_partition == i) %>% select(., count) %>% unlist() %>% unname() %>% sum()
+  upd8_infer_counts = c(upd8_infer_counts, x)
+}
+
+true_counts = vector()
+for(i in unique(partitioning$true_partition)){
+  x = filter(partitioning, true_partition == i) %>% select(., count) %>% unlist() %>% unname() %>% sum()
+  true_counts = c(true_counts, x)
+}
+
+old_infer_counts = vector()
+for(i in 1:3){
+  x = filter(partitioning, partition == i) %>% select(., count) %>% unlist() %>% unname() %>% sum()
+  old_infer_counts = c(old_infer_counts, x)
+}
+
+#looks much better when we update partition membership at the end 
+rbind(upd8_infer_counts, true_counts, old_infer_counts)
+
+#do this for each dataset for this miRNA, curious if we on average see an improvement when we let everything move at the end
+counts_estimates_by_dataset = list()
+start = Sys.time()
+for(i in 1:1){
+  #get already fit partition_df object
+  partitioning = partition_objs[[i]]$partition_df
+  #create true_partition column
+  partitioning$true_partition = rep(0, nrow(partitioning))
+  #get isomiR sequences from associated data object:
+  true_isomiR_seqs = data_list[[i]]$isomiR_seqs
+  center_seqs = names(true_isomiR_seqs)
+  for(j in center_seqs){
+    p = filter(partitioning, uniqueSequence == j) %>% select(., partition) %>% unlist() %>% unname()
+    partitioning$true_partition[partitioning$uniqueSequence %in% true_isomiR_seqs[[j]]] = p
+  }
+  master_alignments = list()
+  master_transitions = list()
+  master_lambdas = list()
+  inferred_isomiR_seqs = filter(partitioning, center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+  for(j in center_seqs){
+    master_alignments[[j]] = lapply(inferred_isomiR_seqs, Biostrings::pairwiseAlignment, pattern = j)
+    names(master_alignments[[j]]) = inferred_isomiR_seqs
+  }
+  for(j in names(master_alignments)){
+    master_transitions[[j]] = lapply(master_alignments[[j]], get_transitions)
+  }
+  for(j in names(master_transitions)){
+    master_lambdas[[j]] = lapply(master_transitions[[j]], compute_lambda, transition_probs = transition_probs)
+  }
+  
+  partitioning$updated_partition = rep(0, nrow(partitioning))
+  #get updated partition memberships 
+  for(i in inferred_isomiR_seqs){
+    l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
+    upd8_p = which(l == max(l))
+    partitioning$updated_partition[partitioning$uniqueSequence==i] = upd8_p
+  }
+  
+  for(i in 1:3){
+    partitioning$updated_partition[partitioning$uniqueSequence == center_seqs[i]] = i
+    partitioning$true_partition[partitioning$uniqueSequence==center_seqs[i]] = i
+  }
+  
+  true_counts = sapply(1:3, function(x) filter(partitioning, true_partition==x) %>% select(., count) %>% unlist() %>% sum())
+  upd8_counts = sapply(1:3, function(x) filter(partitioning, updated_partition==x) %>% select(., count) %>% unlist() %>% sum())
+  old_infer_counts = sapply(1:3, function(x) filter(partitioning, partition ==x) %>% select(., count) %>% unlist() %>% sum())
+  counts_estimates_by_dataset[[i]] = rbind(true_counts, upd8_counts, old_infer_counts)
+}
+elapsed = Sys.time() - start 
+```
+
+
+```{r}
+path = "/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1b_3p*/"
+files = list.files(path)
+infer_count_matrices = lapply(files, function(x) paste0(path, x, collapse="") %>% readRDS())
+
+head(infer_count_matrices)
+
+moving_improved = 0
+for(j in 1:3){
+  upd8_mse = vector()
+  old_mse = vector()
+  for(i in 1:length(infer_count_matrices)){
+    mat = infer_count_matrices[[i]]
+    upd8_mse = c(upd8_mse,(mat["upd8_counts", j]-mat["true_counts",j])^2)
+    old_mse = c(old_mse, (mat["old_infer_counts",j]-mat["true_counts", j])^2)
+  }
+  cat("\n upd8_mse:", mean(upd8_mse))
+  cat("\n old_infer_mse:", mean(old_mse))
+}
+
+#upd8_mse = upd8_mse/i
+```
+
+
+```{r}
+# denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matrix,
+#                                  miRNA, omega_A=NULL, max_iter = NULL, adjust_method=c("BH", "Bonferroni"), move_all=FALSE){
+#   #initialize partition_df object 
+#   cat("Creating initial partition_df object for miRNA", miRNA, "\n")
+#   partition_df = cbind(rowdata, count=count_df) %>% data.frame() %>% filter(., miRNA_name == miRNA)
+#   partition_df$partition = rep(1, nrow(partition_df))
+#   partition_df$center = rep(0, nrow(partition_df))
+#   
+#   #id initial center sequence 
+#   initial_center_seq = filter(partition_df, count==max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#   
+#   partition_df$center[partition_df$uniqueSequence == initial_center_seq] = 1
+#   
+#   #with initial partition, complete 1st iteration outside of a while loop
+#   
+#   #STEP1 - get pairwise alignments between center sequence and all other sequences mapping to user-specified miRNA
+#   isomiR_seqs = partition_df$uniqueSequence[partition_df$center==0]
+#   cat("Getting initial alignments\n")
+#   alignments = lapply(isomiR_seqs, Biostrings::pairwiseAlignment, pattern=initial_center_seq)
+#   names(alignments) = isomiR_seqs
+#   cat("Getting initial transitions \n")
+#   transitions = lapply(alignments, get_transitions)
+#   cat("Calculating initial lambdas\n")
+#   lambdas = lapply(transitions, compute_lambda, transition_probs=transition_probability_matrix)
+#   master_lambdas = list(lambdas)
+#   names(master_lambdas) = 1 
+#   
+#   niter = 1
+#   no_change = 0 
+#   while(niter <= max_iter & no_change < 1){
+#     cat("Beginning iteration", niter, "\n")
+#     cat("Computing abundance p-values \n")
+#     unique_partitions = unique(partition_df$partition) %>% as.numeric() %>% sort()
+#     
+#     isomiR_seqs = partition_df$uniqueSequence[partition_df$center == 0]
+#     raw_p = vector(length = length(isomiR_seqs))
+#     names(raw_p) = isomiR_seqs
+#     
+#     for(j in unique_partitions){
+#       nj = filter(partition_df, partition == j & center == 1) %>% select(., count) %>% unlist() %>% unname()
+#       cat("Partition", j, "center sequence has observed read count", nj, "\n")
+#       partition_isomiRs = filter(partition_df, partition == j & center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#       cat("Partition", j, "contains", length(partition_isomiRs), "non center sequences. \n")
+#       for(i in partition_isomiRs){
+#         #cat("seq:", i, "\n")
+#         ni = filter(partition_df, uniqueSequence == i) %>% select(., count) %>% unlist()
+#         #cat("lambda:",lambda, "\n")
+#         lambda = master_lambdas[[j]][[i]]
+#         num = ppois(ni-1, nj*lambda, lower.tail=FALSE)
+#         denom = 1-dpois(0, nj*lambda)
+#         #cat("Raw p-value:", num/denom, "\n")
+#         raw_p[i] = num/denom
+#       }
+#     }
+#     
+#     cat("Adjusting for multiple testing and getting hypothesis testing results \n")
+#     
+#     if(adjust_method == "BH"){
+#       cat("Adjusting for multiple testing using Benjamini-Hochberg procedure\n")
+#       adjusted_p = p.adjust(raw_p, method="BH")
+#       results = rep(0, length(adjusted_p))
+#       results[adjusted_p < omega_A] = 1
+#       results_df = cbind(raw_p=raw_p, adj_p=adjusted_p, sig = results) %>% data.frame()
+#     } else if(adjust_method == "Bonferroni"){
+#       cat("Adjusting for multiple testing using Bonferroni\n")
+#       results = rep(0, length(raw_p))
+#       results[raw_p < omega_A/length(results)] = 1
+#       results_df = cbind(adj_p=raw_p, sig = results) %>% data.frame()
+#     }
+#     
+#     #now we need to use the results to potentially ID a new center sequence for each existing partition
+#     
+#     #first - create copy of partition_df for updating 
+#     update_df = partition_df 
+#     
+#     for(j in unique_partitions){
+#       #for each partition, get list of partition isomiRs 
+#       partition_isomiRs = filter(partition_df, partition == j  & center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#       #create subset of hypothesis testing results for partition isomiRs 
+#       results_subset_df = results_df[partition_isomiRs,]
+#       # filter subset for significant p-values only if we have more than 0 rows in results_subset_df
+#       if(nrow(results_subset_df) > 0){
+#         new_center_seq = filter(results_subset_df, sig == 1)
+#         if(nrow(new_center_seq) > 0){
+#           new_center_seq = filter(new_center_seq, adj_p==min(adj_p)) %>% row.names()
+#           new_partition = max(update_df$partition) + 1 
+#           cat("Creating partition", new_partition, "from partition", j, ". Checking for new center sequence to  create partition. \n")
+#           if(length(new_center_seq) > 1){
+#             cat("Multiple candidates for new center sequence. Picking most abundant sequence.\n")
+#             new_center_seq= filter(partition_df, uniqueSequence %in% new_center_seq) %>% 
+#               filter(., count == max(count)) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#             #new_center_seq = sample(new_center_seq, 1)
+#           }
+#           update_df$partition[update_df$uniqueSequence == new_center_seq] = new_partition
+#           update_df$center[update_df$uniqueSequence == new_center_seq] = 1
+#         }
+#       }
+#     }
+#     
+#     #after IDing new center sequences / creating new partitions, we need to update our list of unique partitions and center sequences
+#     center_seqs = update_df$uniqueSequence[update_df$center == 1]
+#     
+#     #check to see if we've created any new partitions: 
+#     if(setequal(unique_partitions, unique(update_df$partition))==TRUE){
+#       cat("No new partitions created.\n")
+#       cat("Ending at iteration", niter, "\n")
+#       return(list(partition_df=partition_df, initial_center_seq=initial_center_seq, alignments=alignments, transitions=transitions, results_subset_df=results_subset_df, raw_p=raw_p, results_df=results_df, master_lambdas=master_lambdas, niter=niter, no_change=no_change, update_df=update_df))
+#     }
+#     
+#     unique_partitions = unique(update_df$partition) %>% as.numeric() %>% sort()
+#     
+#     #get list of sequences with significant p-values so we can consider those sequences for new group membership
+#     
+#     significant_seqs = row.names(results_df[results_df$sig==1,])
+#     significant_seqs = significant_seqs[!(significant_seqs %in% center_seqs)]
+#     
+#     #isomiR_seqs = filter(update_df, center == 0) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#     
+#     for(j in unique_partitions){
+#       if(!(j %in% names(master_lambdas))){
+#         center_seq = filter(update_df, partition == j & center == 1) %>% select(., uniqueSequence) %>% unlist() %>% unname()
+#         #if(move_all == TRUE)
+#         new_alignments = lapply(significant_seqs, Biostrings::pairwiseAlignment, pattern = center_seq)
+#         names(new_alignments) = significant_seqs
+#         new_transitions = lapply(new_alignments, get_transitions)
+#         new_lambdas = lapply(new_transitions, compute_lambda, transition_probs = transition_probability_matrix)
+#         master_lambdas[[length(master_lambdas)+1]] = new_lambdas
+#       }
+#     }
+#     names(master_lambdas) = unique_partitions
+#     
+#     #now we need to determine which partition significant sequences are joining 
+#     
+#     
+#     for(i in significant_seqs){
+#       l = lapply(master_lambdas, function(x) return(x[[i]])) %>% unlist()
+#       new_p = names(l[which(l==max(l))]) %>% as.numeric()
+#       if(length(new_p) > 1){
+#         new_p = sample(new_p, 1)
+#       }
+#       update_df$partition[update_df$uniqueSequence == i] = new_p
+#     }
+#     
+#     cat("Finishing iteration", niter, "\n")
+#     niter = niter+1
+#     partition_df=update_df
+#   }
+#   #return everything we can rn because we're in the development stages (ugh lol)
+#   return(list(partition_df=partition_df, initial_center_seq=initial_center_seq, alignments=alignments, 
+#               transitions=transitions, results_subset_df=results_subset_df, raw_p=raw_p, results_df=results_df, 
+#               master_lambdas=master_lambdas, niter=niter, no_change=no_change, update_df=update_df, new_center_seq=new_center_seq))
+# }
+
+```
