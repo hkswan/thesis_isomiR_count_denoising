@@ -7,12 +7,26 @@
 source("/scratch/hswan/thesis_isomiR_count_denoising/Code/denoise_isomiR_counts_update_partitions_at_end.R")
 transition_probs = readRDS("/scratch/hswan/thesis_isomiR_count_denoising/initial_transition_probs.Rds")
 
+
+args = commandArgs(trailingOnly = TRUE)
+
+print(args)
+
+miRNA_idx = as.numeric(args[1])
+num_datasets = as.numeric(args[2])
+
+print(miRNA_idx)
+print(num_datasets)
+
 mousedata = load_mouse_miRNA_data()
 rowdata = mousedata$rowdata
 countdata = mousedata$countdata
 
+true_miRNAs = get_true_mouse_miRNAs(rowdata)
+miRNA = true_miRNAs[miRNA_idx]
 
-generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num_true_partitions=1, 
+
+generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num_true_partitions=1,
                                       seed=1989, max_iter=1000, num_isomiRs=10, transition_probs){
   count_df = rowSums(mouse_countdata)
   d = cbind(mouse_rowdata, count=count_df) %>% data.frame() %>% filter(., miRNA_name == miRNA)
@@ -20,16 +34,16 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
   center_seqs = d$uniqueSequence[1:num_true_partitions]
   njs = d$count[1:num_true_partitions]
   names(njs) = center_seqs
-  
+
   isomiR_sequences = list()
-  
-  #create our list of nucleotides to sample from: 
+
+  #create our list of nucleotides to sample from:
   nucs = c("A", "C", "G", "T")
   ends = c("3p", "5p")
   typeof_edits = c("seq", "length")
   typeof_length_edit = c("add", "remove")
-  num_iter = 0 
-  
+  num_iter = 0
+
   cat("Generating isomiR sequences from real data\n")
   set.seed(seed)
   for(j in 1:num_true_partitions){
@@ -40,19 +54,19 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
       seq = center_seqs[j]
       #sample edit distance:
       edit_dist = sample(1:5, 1)
-      #for each of the edits, 
+      #for each of the edits,
       for(i in 1:edit_dist){
-        #we sample the edit type - either length or sequence 
+        #we sample the edit type - either length or sequence
         edit_type = sample(typeof_edits, 1)
-        #if its a length edit, then we're going to add or remove a nucleotide 
+        #if its a length edit, then we're going to add or remove a nucleotide
         if(edit_type == "length"){
-          #choose randomly to add or remove 
+          #choose randomly to add or remove
           typeof_length_change = sample(typeof_length_edit, 1)
           #if we're adding a nucleotide
           if(typeof_length_change == "add"){
             #sample the nucleotide to add
             nuc_to_add = sample(nucs, 1)
-            #sample the end we're going to add it to: 
+            #sample the end we're going to add it to:
             end_to_add_to = sample(ends, 1)
             if(end_to_add_to == "3p"){
               seq = paste0(nuc_to_add, seq, collapse="")
@@ -63,22 +77,22 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
             #otherwise we pick an end of the sequence and remove that nucleotide
             end_to_change = sample(ends, 1)
             if(end_to_change == "5p"){
-              #if we're changing the 5p end of the sequence, we remove the first nucleotide of the sequence 
+              #if we're changing the 5p end of the sequence, we remove the first nucleotide of the sequence
               seq = substr(seq, start = 2, stop = nchar(seq))
             } else if(end_to_change == "3p"){
-              #if we're changing the 3p end of the sequence, we remove the last nucleotide of the sequence 
+              #if we're changing the 3p end of the sequence, we remove the last nucleotide of the sequence
               seq = substr(seq, start = 1 , stop = nchar(seq) - 1)
             }
           }
         } else if(edit_type == "seq"){
           #otherwise if the edit type is a sequence then we are going to randomly select a position along the sequence
-          #and edit the nucleotide that's currently present at that position 
+          #and edit the nucleotide that's currently present at that position
           nuc_being_subbed = sample(nucs, 1)
           position_to_sub_at = sample(1:nchar(seq), 1)
           substr(seq, position_to_sub_at, position_to_sub_at) = nuc_being_subbed
         }
       }
-      #check to see if sequence is already in vector 
+      #check to see if sequence is already in vector
       if(!(seq %in% isomiRs_vec) & seq != center_seqs[j]){
         isomiRs_vec = c(isomiRs_vec, seq)
       }
@@ -87,38 +101,23 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
     isomiR_sequences[[j]] = isomiRs_vec
   }
   names(isomiR_sequences) = center_seqs
-  
-  unique_isomiRs = unlist(isomiR_sequences) %>% unname() %>% unique()
-  
-  if(length(unique_isomiRs) != length(unlist(isomiR_sequences))){
-    cat("Duplicate sequences present. Need to remove duplicates \n")
-    for(seq in unique_isomiRs){
-      counter = 0
-      idxs = vector()
-      for(j in 1:length(isomiR_sequences)){
-        if(seq %in% isomiR_sequences[[j]]){
-          counter = counter+1
-          idxs = c(idxs, j)
-        }
-      }
-      if(counter > 1){
-        #randomly select which one its going to stay in 
-        keep = sample(idxs, 1)
-        remove_frm = !(1:length(isomiR_sequences) %in% keep)
-        for(k in remove_frm){
-          x = isomiR_sequences[[k]]
-          z = which(x == seq)
-          x = x[-z]
-          isomiR_sequences[[k]] = x
-        }
-      }
+
+  #rmv any duplicate sequences
+  iso = unique(unlist(isomiR_sequences))
+  duplicate_seqs = vector()
+  for(seq in iso){
+    membership = lapply(isomiR_sequences, function(x) seq %in% x) %>% unlist()
+    if(sum(membership) > 1){
+      duplicate_seqs = c(duplicate_seqs, seq)
     }
   }
-  
+
+  isomiR_sequences = lapply(isomiR_sequences, function(x) return(x[!(x %in% duplicate_seqs)]))
+
   cat("Calculating location parameters of error distributions for generated sequences \n")
-  
+
   lambdas = list()
-  
+
   for(j in 1:length(isomiR_sequences)){
     #alignments
     alignments = lapply(isomiR_sequences[[j]], Biostrings::pairwiseAlignment, pattern = names(isomiR_sequences[j]))
@@ -129,13 +128,13 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
     lambdas[[j]] = lapply(transitions, compute_lambda, transition_probs=transition_probs) %>% unlist()
   }
   names(lambdas) = center_seqs
-  
+
   mus = list()
   for(j in 1:length(lambdas)){
     mus[[j]] = njs[center_seqs[j]]*lambdas[[j]]
   }
-  
-  #now draw counts 
+
+  #now draw counts
   sim_counts = vector()
     for(j in 1:length(mus)){
       mu_vec = mus[[j]]
@@ -146,13 +145,31 @@ generate_simulated_dataset = function(mouse_rowdata, mouse_countdata, miRNA, num
   cat("Assembling simulated data for compatability with denoising algorithm \n")
   sim_counts = c(sim_counts, unname(njs))
   uniqueSequences = c(unlist(isomiR_sequences), center_seqs)
-  
+
   sim_rowdata = cbind(uniqueSequences, rep(miRNA, length(uniqueSequences))) %>% data.frame()
   colnames(sim_rowdata) = c("uniqueSequence", "miRNA_name")
   row.names(sim_rowdata) = NULL
-  
-  return(list(center_seqs=center_seqs, isomiR_sequences=isomiR_sequences, lambdas=lambdas, mus=mus, njs=njs, 
+
+  return(list(center_seqs=center_seqs, isomiR_sequences=isomiR_sequences, lambdas=lambdas, mus=mus, njs=njs,
               sim_rowdata=sim_rowdata, sim_counts=sim_counts))
 }
 
-tst = generate_simulated_dataset(rowdata, countdata, miRNA, 2, transition_probs=transition_probs)
+dataset_list = list()
+for(i in 1:num_datasets){
+  cat("Generating dataset", i, "\n")
+  dataset_list[[i]] = generate_simulated_dataset(rowdata, countdata, miRNA, 2, i,
+                                                 num_isomiRs=50, transition_probs=transition_probs)
+}
+
+# tst_partitions_list = list()
+# for(i in 1:num_datasets){
+#   cat("Denoising dataset", i, "\n")
+#   tst_partitions_list[[i]] = denoise_isomiR_counts(dataset_list[[i]]$sim_rowdata, dataset_list[[i]]$sim_counts,
+#                                                   transition_probs, miRNA, 0.05, 10, "BH")
+# }
+
+
+save_file_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/multi_partition_isomiRs/"
+save_file_name = paste0(miRNA, "_", num_datasets, "_simulated_datasets.Rds")
+
+saveRDS(dataset_list, paste0(save_file_path, save_file_name, collapse=""))
