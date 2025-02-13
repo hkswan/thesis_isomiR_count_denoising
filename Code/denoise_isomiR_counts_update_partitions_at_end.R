@@ -13,6 +13,20 @@ denoise_isomiR_counts = function(rowdata, count_df, transition_probability_matri
   #initialize partition_df object 
   cat("Creating initial partition_df object for miRNA", miRNA, "\n")
   partition_df = cbind(rowdata, count=count_df) %>% data.frame() %>% filter(., miRNA_name == miRNA)
+  cat("Removing any duplicate sequences \n")
+  
+  for(seq in unique(partition_df$uniqueSequence)){
+    row_idxs = which(partition_df$uniqueSequence == seq)
+    if(length(row_idxs) > 1){
+      #print(row_idxs)
+      obs_count = sum(partition_df$count[row_idxs])
+      keep_idx = row_idxs[1]
+      partition_df$count[keep_idx] = obs_count
+      partition_df = partition_df[-row_idxs[-1],]
+    }
+    #print(row_idxs)
+  }
+  
   partition_df$partition = rep(1, nrow(partition_df))
   partition_df$center = rep(0, nrow(partition_df))
   

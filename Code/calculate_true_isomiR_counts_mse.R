@@ -6,8 +6,10 @@ partition_files = list.files(partition_path)
 successful_miRNAs = sapply(partition_files, function(x) return(strsplit(x, "_partition")[[1]][[1]]))
 
 tst_miRNA = successful_miRNAs[1]
+tst_miRNA = "Mmu-Let-7-P1b_5p"
 
 data_path = "/scratch/hswan/thesis_isomiR_count_denoising/data/simulated_data/length_variants_multi_partition/01_24_2025"
+
 data_files = list.files(data_path)
 
 datafilename = data_files[grepl(tst_miRNA, data_files)]
@@ -33,11 +35,11 @@ for(i in 1:length(partition_objs)){
 }
 
 
-files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1b_3p*")
+files = list.files("/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1b_5p")
 
 upd8d_counts=list()
 for(i in 1:length(files)){
-  upd8d_counts[[i]] = paste0("/gpfs/fs2/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1b_3p*/",
+  upd8d_counts[[i]] = paste0("/gpfs/fs2/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1b_5p/",
          files[i], collapse="") %>% readRDS()
 }
 
@@ -51,7 +53,20 @@ df = data.frame(x=rep(1:length(upd8d_counts),2), y=c(mses, upd8d_mses), z=c(rep(
 df$z = as.factor(df$z)
 
 ggplot(df, aes(x=x, y=log(y), col=z)) + geom_point() + geom_abline(slope = 0, intercept = mean(log(upd8d_mses)), col='red') + 
-  geom_abline(slope = 0, intercept = mean(log(mses)), col='lightblue3')
+  geom_abline(slope = 0, intercept = mean(log(mses)), col='lightblue3') + xlab("Dataset index") + ylab("Log of MSE")
 
 sum(upd8d_mses <= mses)
 wilcox.test(upd8d_mses-mses)
+
+calculate_mses = function(infer_counts_matrix){
+  old_mse = mean((infer_counts_matrix["true_counts",]-infer_counts_matrix["old_infer_counts",])^2)
+  new_mse = mean((infer_counts_matrix["true_counts",]-infer_counts_matrix["upd8_counts",])^2)
+  return(list(old_mse=old_mse, new_mse=new_mse))
+}
+
+
+files = list.files('/gpfs/fs2/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1d_5p')
+
+mses = lapply(files, function(x) return(paste0("/gpfs/fs2/scratch/hswan/thesis_isomiR_count_denoising/sims/01_24_2025/multi_partitions/upd8_count_estimation/Mmu-Let-7-P1d_5p/",x,
+                                               collapse="") %>% readRDS() %>% calculate_mses()))
+lapply(mses, function(x) return(x[["new_mse"]] <= x[["old_mse"]])) %>% unlist() %>% sum()
